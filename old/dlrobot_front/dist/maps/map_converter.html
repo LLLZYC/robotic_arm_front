@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PGM地图转换器</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e2e8f0;
+        }
+        .container {
+            background: #2d3748;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            color: #63b3ed;
+        }
+        .solution {
+            background: #4a5568;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 6px;
+            border-left: 4px solid #63b3ed;
+        }
+        code {
+            background: #1a1a1a;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .warning {
+            background: #fed7d7;
+            color: #742a2a;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>PGM地图加载解决方案</h1>
+    
+    <div class="container">
+        <h2>问题说明</h2>
+        <p>PGM (Portable Gray Map) 文件是二进制格式，不能直接在浏览器中作为图像加载。</p>
+        
+        <div class="warning">
+            <strong>注意：</strong> 浏览器无法直接显示PGM文件，需要转换或使用其他方案。
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>解决方案</h2>
+        
+        <div class="solution">
+            <h3>方案1：服务器端转换（推荐）</h3>
+            <p>在ROS后端添加一个API，将PGM转换为PNG格式：</p>
+            <code>
+                # Python Flask示例
+                @app.route('/api/map/image')
+                def get_map_image():
+                    # 读取PGM文件并转换为PNG
+                    import cv2
+                    img = cv2.imread('map.pgm', cv2.IMREAD_GRAYSCALE)
+                    _, png_data = cv2.imencode('.png', img)
+                    return Response(png_data.tobytes(), mimetype='image/png')
+            </code>
+            <p><strong>优点：</strong> 性能好，支持所有PGM特性</p>
+            <p><strong>缺点：</strong> 需要后端支持</p>
+        </div>
+
+        <div class="solution">
+            <h3>方案2：使用地图服务</h3>
+            <p>通过ROS的map_server提供地图瓦片服务：</p>
+            <code>
+                # 启动map_server
+                rosrun map_server map_server map.yaml
+                
+                # 前端使用Leaflet加载瓦片
+                L.tileLayer('http://localhost:8080/map/{z}/{x}/{y}.png').addTo(map)
+            </code>
+            <p><strong>优点：</strong> 标准ROS方案，支持缩放</p>
+            <p><strong>缺点：</strong> 需要运行ROS节点</p>
+        </div>
+
+        <div class="solution">
+            <h3>方案3：手动转换（开发阶段）</h3>
+            <p>将PGM文件手动转换为PNG：</p>
+            <code>
+                # 使用ImageMagick转换
+                convert map.pgm map.png
+                
+                # 或使用GIMP等图形工具
+            </code>
+            <p>然后更新map.yaml文件：</p>
+            <code>image: map.png</code>
+            <p><strong>优点：</strong> 简单快速</p>
+            <p><strong>缺点：</strong> 需要手动操作</p>
+        </div>
+
+        <div class="solution">
+            <h3>方案4：使用占位符地图（当前实现）</h3>
+            <p>当前系统使用Canvas生成占位符地图：</p>
+            <code>
+                // 在RobotMap.vue中
+                const placeholderImage = createPlaceholderMap(L, config)
+            </code>
+            <p><strong>优点：</strong> 无需额外配置</p>
+            <p><strong>缺点：</strong> 不是真实地图</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>立即测试</h2>
+        <p>当前系统已配置为使用方案4（占位符地图）。要测试真实地图：</p>
+        
+        <ol>
+            <li>将真实的PGM文件转换为PNG格式</li>
+            <li>将转换后的PNG文件放入 <code>public/maps/</code> 目录</li>
+            <li>更新 <code>public/maps/map.yaml</code> 中的image路径</li>
+        </ol>
+        
+        <p><strong>示例：</strong> 如果转换后的文件名为 <code>real_map.png</code>，则修改map.yaml：</p>
+        <code>image: /maps/real_map.png</code>
+    </div>
+
+    <div class="container">
+        <h2>下一步建议</h2>
+        <p>对于生产环境，建议采用<strong>方案1（服务器端转换）</strong>，这样可以：</p>
+        <ul>
+            <li>实时获取最新的地图数据</li>
+            <li>支持动态地图更新</li>
+            <li>更好的性能和兼容性</li>
+        </ul>
+    </div>
+</body>
+</html>

@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>巡航控制功能演示</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #2d3748;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+        
+        .feature-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            border-left: 5px solid #4299e1;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .feature-card h3 {
+            color: #2d3748;
+            margin-top: 0;
+            font-size: 1.3em;
+        }
+        
+        .feature-card p {
+            color: #718096;
+            line-height: 1.6;
+        }
+        
+        .feature-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+            display: block;
+        }
+        
+        .demo-section {
+            background: #edf2f7;
+            border-radius: 10px;
+            padding: 25px;
+            margin: 20px 0;
+        }
+        
+        .demo-section h2 {
+            color: #2d3748;
+            margin-top: 0;
+        }
+        
+        .step-list {
+            counter-reset: step-counter;
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .step-list li {
+            counter-increment: step-counter;
+            margin-bottom: 15px;
+            position: relative;
+            padding-left: 50px;
+            min-height: 40px;
+        }
+        
+        .step-list li::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 0;
+            top: 0;
+            background: #4299e1;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        
+        .code-block {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+        
+        .highlight {
+            background: #fef5e7;
+            border: 1px solid #f9e79f;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        
+        .highlight h4 {
+            color: #f39c12;
+            margin-top: 0;
+        }
+        
+        .api-endpoint {
+            background: #e8f5e8;
+            border: 1px solid #c3e6c3;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 5px 0;
+            font-family: monospace;
+        }
+        
+        .method-get {
+            color: #28a745;
+            font-weight: bold;
+        }
+        
+        .method-post {
+            color: #007bff;
+            font-weight: bold;
+        }
+        
+        .screenshot {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .screenshot img {
+            max-width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚗 DLRobot 巡航控制功能演示</h1>
+        
+        <div class="feature-grid">
+            <div class="feature-card">
+                <span class="feature-icon">📍</span>
+                <h3>巡航点管理</h3>
+                <p>可视化编辑、添加、删除巡航点，支持精确的坐标和朝向设置，实时保存到后端配置。</p>
+            </div>
+            
+            <div class="feature-card">
+                <span class="feature-icon">🎮</span>
+                <h3>手动控制</h3>
+                <p>通过方向键实时控制机器人移动，可调节速度和转向速度，支持前进、后退、左转、右转。</p>
+            </div>
+            
+            <div class="feature-card">
+                <span class="feature-icon">⏯️</span>
+                <h3>巡航控制</h3>
+                <p>一键开始、停止、恢复巡航任务，实时显示巡航状态和当前目标点。</p>
+            </div>
+            
+            <div class="feature-card">
+                <span class="feature-icon">📊</span>
+                <h3>状态监控</h3>
+                <p>实时显示机器人位置、巡航状态、目标点信息，与后端系统完全同步。</p>
+            </div>
+        </div>
+        
+        <div class="demo-section">
+            <h2>🚀 快速开始</h2>
+            <ol class="step-list">
+                <li>启动前端应用：<code>npm run dev</code></li>
+                <li>启动后端 autocontrol 节点：<code>roslaunch dlrobot_autocontrol autocontrol.launch</code></li>
+                <li>在浏览器中打开 <code>http://localhost:3002</code></li>
+                <li>点击 "🚗 巡航控制" 标签页</li>
+                <li>确保 MQTT 和 REST API 连接正常</li>
+            </ol>
+        </div>
+        
+        <div class="demo-section">
+            <h2>🎯 巡航点操作演示</h2>
+            
+            <h3>添加巡航点</h3>
+            <ol class="step-list">
+                <li>点击 "➕ 添加巡航点" 按钮</li>
+                <li>在弹出的对话框中填写：
+                    <div class="code-block">
+名称: waypoint_entrance<br>
+X 坐标: 2.5<br>
+Y 坐标: 1.5<br>
+YAW 角度: 1.57 (90度)<br>
+到达前等待: 2.0秒<br>
+到达后等待: 3.0秒
+                    </div>
+                </li>
+                <li>点击 "保存" 完成添加</li>
+                <li>点击 "💾 保存巡航点" 将配置保存到后端</li>
+            </ol>
+            
+            <h3>前往特定巡航点</h3>
+            <p>在巡航点列表中，点击目标巡航点旁的 "🎯" 按钮，机器人将立即导航到该位置。</p>
+            
+            <h3>编辑和删除</h3>
+            <ul>
+                <li>点击 "✏️" 按钮编辑现有巡航点</li>
+                <li>点击 "🗑️" 按钮删除不需要的巡航点</li>
+            </ul>
+        </div>
+        
+        <div class="demo-section">
+            <h2>🎮 手动控制演示</h2>
+            
+            <div class="highlight">
+                <h4>⚠️ 安全提示</h4>
+                <p>使用手动控制时，请确保机器人周围有足够的空间，并适当控制速度以避免碰撞。</p>
+            </div>
+            
+            <h3>基本操作</h3>
+            <ul>
+                <li><strong>前进</strong>: 按住 "⬆️" 按钮</li>
+                <li><strong>后退</strong>: 按住 "⬇️" 按钮</li>
+                <li><strong>左转</strong>: 按住 "⬅️" 按钮</li>
+                <li><strong>右转</strong>: 按住 "➡️" 按钮</li>
+            </ul>
+            
+            <h3>速度调节</h3>
+            <ul>
+                <li><strong>线性速度</strong>: 0.1 - 1.0 m/s (控制前进后退速度)</li>
+                <li><strong>角速度</strong>: 0.1 - 1.0 rad/s (控制转向速度)</li>
+            </ul>
+            
+            <p>松开按钮后，机器人会自动停止移动。</p>
+        </div>
+        
+        <div class="demo-section">
+            <h2>🔄 巡航任务控制</h2>
+            
+            <h3>巡航状态</h3>
+            <ul>
+                <li><strong>待机</strong>: 机器人空闲，等待指令</li>
+                <li><strong>巡航中</strong>: 正在按巡航点序列导航</li>
+                <li><strong>已停止</strong>: 巡航任务被暂停</li>
+            </ul>
+            
+            <h3>控制操作</h3>
+            <ul>
+                <li><strong>▶️ 开始巡航</strong>: 开始或恢复巡航任务</li>
+                <li><strong>⏹️ 停止巡航</strong>: 立即停止当前巡航任务</li>
+                <li><strong>⏯️ 恢复巡航</strong>: 从停止状态恢复巡航</li>
+            </ul>
+        </div>
+        
+        <div class="demo-section">
+            <h2>🔌 API 接口说明</h2>
+            
+            <h3>巡航点管理</h3>
+            <div class="api-endpoint">
+                <span class="method-get">GET</span> /api/navigation/default_goals
+                <br>获取当前配置的所有巡航点
+            </div>
+            
+            <div class="api-endpoint">
+                <span class="method-post">POST</span> /api/navigation/default_goals
+                <br>更新巡航点配置
+                <div class="code-block">
+{
+  "goals": [
+    {
+      "name": "waypoint_a",
+      "position": {"x": 1.0, "y": 0.0, "z": 0.0},
+      "orientation": {"yaw": 0.0},
+      "wait_before": 2.0,
+      "wait_after": 3.0
+    }
+  ]
+}
+                </div>
+            </div>
+            
+            <h3>巡航控制</h3>
+            <div class="api-endpoint">
+                <span class="method-post">POST</span> /api/navigation/hold
+                <br>停止巡航任务
+            </div>
+            
+            <div class="api-endpoint">
+                <span class="method-post">POST</span> /api/navigation/resume
+                <br>恢复巡航任务
+            </div>
+            
+            <h3>手动控制</h3>
+            <p>通过 MQTT 发布到 <code>/cmd_vel</code> 话题：</p>
+            <div class="code-block">
+{
+  "linear": {"x": 0.3, "y": 0, "z": 0},
+  "angular": {"x": 0, "y": 0, "z": 0.5}
+}
+            </div>
+        </div>
+        
+        <div class="demo-section">
+            <h2>🛠️ 技术实现</h2>
+            
+            <h3>前端架构</h3>
+            <ul>
+                <li><strong>Vue 3 + Composition API</strong>: 现代化的响应式界面</li>
+                <li><strong>Pinia Store</strong>: 集中状态管理</li>
+                <li><strong>MQTT.js</strong>: 实时通信和状态同步</li>
+                <li><strong>Axios</strong>: REST API 调用</li>
+            </ul>
+            
+            <h3>后端集成</h3>
+            <ul>
+                <li><strong>dlrobot_autocontrol</strong>: ROS 节点提供巡航控制服务</li>
+                <li><strong>REST API</strong>: 端口 17863，提供 HTTP 接口</li>
+                <li><strong>MQTT Broker</strong>: 端口 9001，处理实时消息</li>
+                <li><strong>move_base</strong>: 底层导航系统</li>
+            </ul>
+            
+            <h3>数据流</h3>
+            <ol>
+                <li>用户界面操作 → REST API 请求</li>
+                <li>后端处理 → 更新巡航配置</li>
+                <li>状态变化 → MQTT 消息推送</li>
+                <li>前端接收 → 实时界面更新</li>
+            </ol>
+        </div>
+        
+        <div class="highlight">
+            <h4>💡 使用建议</h4>
+            <ul>
+                <li>在开始巡航前，确保所有巡航点坐标正确</li>
+                <li>使用手动控制进行精确位置调整</li>
+                <li>定期保存巡航点配置以防丢失</li>
+                <li>监控巡航状态，及时处理异常情况</li>
+            </ul>
+        </div>
+        
+        <div style="text-align: center; margin-top: 40px; color: #718096;">
+            <p>🤖 DLRobot 巡航控制功能 - 让机器人导航更简单</p>
+        </div>
+    </div>
+</body>
+</html>

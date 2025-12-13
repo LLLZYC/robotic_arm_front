@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>坐标转换校准工具</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .input-group { margin: 10px 0; }
+        label { display: inline-block; width: 150px; }
+        input { width: 100px; padding: 5px; }
+        button { padding: 10px 20px; margin: 10px 5px; }
+        .result { background: #f0f0f0; padding: 10px; margin: 10px 0; }
+        .success { background: #e0ffe0; }
+        .error { background: #ffe0e0; }
+    </style>
+</head>
+<body>
+    <h1>坐标转换校准工具</h1>
+    
+    <div class="section">
+        <h3>已知对应点</h3>
+        <div class="input-group">
+            <label>ROS坐标 X:</label>
+            <input type="number" id="rosX" value="-0.78" step="0.01">
+        </div>
+        <div class="input-group">
+            <label>ROS坐标 Y:</label>
+            <input type="number" id="rosY" value="1.11" step="0.01">
+        </div>
+        <div class="input-group">
+            <label>前端坐标 lat:</label>
+            <input type="number" id="frontendLat" value="14.28" step="0.01">
+        </div>
+        <div class="input-group">
+            <label>前端坐标 lng:</label>
+            <input type="number" id="frontendLng" value="4.27" step="0.01">
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>转换参数</h3>
+        <div class="input-group">
+            <label>X缩放因子:</label>
+            <input type="number" id="scaleX" value="1.0" step="0.1">
+        </div>
+        <div class="input-group">
+            <label>Y缩放因子:</label>
+            <input type="number" id="scaleY" value="1.0" step="0.1">
+        </div>
+        <div class="input-group">
+            <label>X偏移:</label>
+            <input type="number" id="offsetX" value="0.0" step="0.1">
+        </div>
+        <div class="input-group">
+            <label>Y偏移:</label>
+            <input type="number" id="offsetY" value="0.0" step="0.1">
+        </div>
+        <div class="input-group">
+            <label>交换XY轴:</label>
+            <input type="checkbox" id="swapXY">
+        </div>
+    </div>
+
+    <div class="section">
+        <button onclick="testConversion()">测试转换</button>
+        <button onclick="autoCalibrate()">自动校准</button>
+        <button onclick="generateCode()">生成代码</button>
+        <button onclick="autoWriteToMapUtils()" style="background-color: #4CAF50; color: white;">自动写入mapUtils.js</button>
+    </div>
+
+    <div class="section">
+        <h3>测试结果</h3>
+        <div id="testResults"></div>
+    </div>
+
+    <div class="section">
+        <h3>生成的转换代码</h3>
+        <pre id="generatedCode"></pre>
+    </div>
+
+    <script>
+        function getParameters() {
+            return {
+                scaleX: parseFloat(document.getElementById('scaleX').value),
+                scaleY: parseFloat(document.getElementById('scaleY').value),
+                offsetX: parseFloat(document.getElementById('offsetX').value),
+                offsetY: parseFloat(document.getElementById('offsetY').value),
+                swapXY: document.getElementById('swapXY').checked
+            };
+        }
+
+        function rosToFrontend(x, y, params) {
+            let resultX = x;
+            let resultY = y;
+            
+            if (params.swapXY) {
+                [resultX, resultY] = [resultY, resultX];
+            }
+            
+            resultX = resultX * params.scaleX + params.offsetX;
+            resultY = resultY * params.scaleY + params.offsetY;
+            
+            return { lat: resultY, lng: resultX };
+        }
+
+        function frontendToRos(lat, lng, params) {
+            let x = lng;
+            let y = lat;
+            
+            x = (x - params.offsetX) / params.scaleX;
+            y = (y - params.offsetY) / params.scaleY;
+            
+            if (params.swapXY) {
+                [x, y] = [y, x];
+            }
+            
+            return { x, y };
+        }
+
+        function testConversion() {
+            const rosX = parseFloat(document.getElementById('rosX').value);
+            const rosY = parseFloat(document.getElementById('rosY').value);
+            const frontendLat = parseFloat(document.getElementById('frontendLat').value);
+            const frontendLng = parseFloat(document.getElementById('frontendLng').value);
+            const params = getParameters();
+            
+            const frontendResult = rosToFrontend(rosX, rosY, params);
+            const rosResult = frontendToRos(frontendLat, frontendLng, params);
+            
+            const latError = Math.abs(frontendResult.lat - frontendLat);
+            const lngError = Math.abs(frontendResult.lng - frontendLng);
+            const xError = Math.abs(rosResult.x - rosX);
+            const yError = Math.abs(rosResult.y - rosY);
+            
+            const results = document.getElementById('testResults');
+            results.innerHTML = `
+                <div class="result ${latError < 0.1 && lngError < 0.1 ? 'success' : 'error'}">
+                    <h4>ROS → 前端转换:</h4>
+                    输入: ROS(${rosX}, ${rosY})<br>
+                    输出: [${frontendResult.lat.toFixed(2)}, ${frontendResult.lng.toFixed(2)}]<br>
+                    期望: [${frontendLat}, ${frontendLng}]<br>
+                    误差: lat=${latError.toFixed(2)}, lng=${lngError.toFixed(2)}
+                </div>
+                <div class="result ${xError < 0.1 && yError < 0.1 ? 'success' : 'error'}">
+                    <h4>前端 → ROS转换:</h4>
+                    输入: [${frontendLat}, ${frontendLng}]<br>
+                    输出: ROS(${rosResult.x.toFixed(2)}, ${rosResult.y.toFixed(2)})<br>
+                    期望: ROS(${rosX}, ${rosY})<br>
+                    误差: x=${xError.toFixed(2)}, y=${yError.toFixed(2)}
+                </div>
+            `;
+        }
+
+        function autoCalibrate() {
+            const rosX = parseFloat(document.getElementById('rosX').value);
+            const rosY = parseFloat(document.getElementById('rosY').value);
+            const frontendLat = parseFloat(document.getElementById('frontendLat').value);
+            const frontendLng = parseFloat(document.getElementById('frontendLng').value);
+            
+            // 尝试不同的参数组合
+            const combinations = [
+                { swapXY: false, scaleX: 1, scaleY: 1 },
+                { swapXY: true, scaleX: 1, scaleY: 1 },
+                { swapXY: false, scaleX: -1, scaleY: 1 },
+                { swapXY: false, scaleX: 1, scaleY: -1 },
+                { swapXY: true, scaleX: -1, scaleY: 1 },
+                { swapXY: true, scaleX: 1, scaleY: -1 },
+            ];
+            
+            let bestParams = null;
+            let minError = Infinity;
+            
+            combinations.forEach(baseParams => {
+                // 计算偏移
+                let testX = rosX;
+                let testY = rosY;
+                
+                if (baseParams.swapXY) {
+                    [testX, testY] = [testY, testX];
+                }
+                
+                testX *= baseParams.scaleX;
+                testY *= baseParams.scaleY;
+                
+                const offsetX = frontendLng - testX;
+                const offsetY = frontendLat - testY;
+                
+                const params = {
+                    ...baseParams,
+                    offsetX: offsetX,
+                    offsetY: offsetY
+                };
+                
+                // 测试误差
+                const result = rosToFrontend(rosX, rosY, params);
+                const error = Math.abs(result.lat - frontendLat) + Math.abs(result.lng - frontendLng);
+                
+                if (error < minError) {
+                    minError = error;
+                    bestParams = params;
+                }
+            });
+            
+            if (bestParams) {
+                document.getElementById('scaleX').value = bestParams.scaleX;
+                document.getElementById('scaleY').value = bestParams.scaleY;
+                document.getElementById('offsetX').value = bestParams.offsetX.toFixed(2);
+                document.getElementById('offsetY').value = bestParams.offsetY.toFixed(2);
+                document.getElementById('swapXY').checked = bestParams.swapXY;
+                
+                testConversion();
+            }
+        }
+
+        function generateCode() {
+            const params = getParameters();
+            
+            const code = `
+// ROS坐标转Leaflet坐标
+export function rosToLeaflet(x, y, mapConfig) {
+    try {
+        // 检查输入参数的有效性
+        if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
+            console.warn('ROS坐标转换错误: 无效的坐标值', { x, y })
+            return [0, 0] // 返回默认坐标
+        }
+        
+        // 使用校准后的转换参数
+        const scaleX = ${params.scaleX}
+        const scaleY = ${params.scaleY}
+        const offsetX = ${params.offsetX}
+        const offsetY = ${params.offsetY}
+        
+        ${params.swapXY ? '// 交换XY轴：ROS的X对应前端的lng，ROS的Y对应前端的lat\n        const tempX = x;\n        const tempY = y;\n        const lng = tempX * scaleX + offsetX;\n        const lat = tempY * scaleY + offsetY;' : '// 直接转换：ROS坐标转前端坐标\n        const lng = x * scaleX + offsetX;\n        const lat = y * scaleY + offsetY;'}
+        
+        // 检查结果是否为有效数字
+        if (isNaN(lat) || isNaN(lng)) {
+            console.warn('ROS坐标转换结果无效:', { lat, lng, x, y })
+            return [0, 0]
+        }
+        
+        // 检查坐标是否在合理范围内
+        if (Math.abs(lat) > 10000 || Math.abs(lng) > 10000) {
+            console.warn('ROS坐标转换结果超出合理范围:', { lat, lng })
+            return [0, 0]
+        }
+        
+        return [lat, lng]
+    } catch (error) {
+        console.error('ROS坐标转换异常:', error)
+        return [0, 0] // 返回安全默认值
+    }
+}
+
+// Leaflet坐标转ROS坐标
+export function leafletToRos(lat, lng, mapConfig) {
+    try {
+        // 检查输入参数的有效性
+        if (lat === undefined || lng === undefined || isNaN(lat) || isNaN(lng)) {
+            console.warn('Leaflet坐标转换错误: 无效的坐标值', { lat, lng })
+            return { x: 0, y: 0 } // 返回默认坐标
+        }
+        
+        // 使用校准后的转换参数（逆向转换）
+        const scaleX = ${params.scaleX}
+        const scaleY = ${params.scaleY}
+        const offsetX = ${params.offsetX}
+        const offsetY = ${params.offsetY}
+        
+        ${params.swapXY ? '// 逆向转换：前端坐标转ROS坐标（考虑XY交换）\n        const x = (lng - offsetX) / scaleX;\n        const y = (lat - offsetY) / scaleY;' : '// 逆向转换：前端坐标转ROS坐标\n        const x = (lng - offsetX) / scaleX;\n        const y = (lat - offsetY) / scaleY;'}
+        
+        // 检查结果是否为有效数字
+        if (isNaN(x) || isNaN(y)) {
+            console.warn('ROS坐标转换结果无效:', { x, y, lat, lng })
+            return { x: 0, y: 0 }
+        }
+        
+        // 检查坐标是否在合理范围内
+        if (Math.abs(x) > 10000 || Math.abs(y) > 10000) {
+            console.warn('ROS坐标转换结果超出合理范围:', { x, y })
+            return { x: 0, y: 0 }
+        }
+        
+        return { x, y }
+    } catch (error) {
+        console.error('Leaflet坐标转换异常:', error)
+        return { x: 0, y: 0 } // 返回安全默认值
+    }
+}`;
+            
+            document.getElementById('generatedCode').textContent = code;
+        }
+
+        async function autoWriteToMapUtils() {
+            const params = getParameters();
+            
+            // 生成完整的函数代码
+            const rosToLeafletCode = `/**
+ * ROS坐标转Leaflet坐标
+ * @param {number} x - ROS X坐标
+ * @param {number} y - ROS Y坐标
+ * @param {Object} mapConfig - 地图配置
+ * @returns {Array} Leaflet坐标 [lat, lng]
+ */
+export function rosToLeaflet(x, y, mapConfig) {
+    try {
+        // 检查输入参数的有效性
+        if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
+            console.warn('ROS坐标转换错误: 无效的坐标值', { x, y })
+            return [0, 0] // 返回默认坐标
+        }
+        
+        // 使用校准后的转换参数
+        const scaleX = ${params.scaleX}
+        const scaleY = ${params.scaleY}
+        const offsetX = ${params.offsetX}
+        const offsetY = ${params.offsetY}
+        
+        ${params.swapXY ? '// 交换XY轴：ROS的X对应前端的lng，ROS的Y对应前端的lat\n        const tempX = x;\n        const tempY = y;\n        const lng = tempX * scaleX + offsetX;\n        const lat = tempY * scaleY + offsetY;' : '// 直接转换：ROS坐标转前端坐标\n        const lng = x * scaleX + offsetX;\n        const lat = y * scaleY + offsetY;'}
+        
+        // 检查结果是否为有效数字
+        if (isNaN(lat) || isNaN(lng)) {
+            console.warn('ROS坐标转换结果无效:', { lat, lng, x, y })
+            return [0, 0]
+        }
+        
+        // 检查坐标是否在合理范围内
+        if (Math.abs(lat) > 10000 || Math.abs(lng) > 10000) {
+            console.warn('ROS坐标转换结果超出合理范围:', { lat, lng })
+            return [0, 0]
+        }
+        
+        return [lat, lng]
+    } catch (error) {
+        console.error('ROS坐标转换异常:', error)
+        return [0, 0] // 返回安全默认值
+    }
+}`;
+
+            const leafletToRosCode = `/**
+ * Leaflet坐标转ROS坐标
+ * @param {number} lat - Leaflet纬度
+ * @param {number} lng - Leaflet经度
+ * @param {Object} mapConfig - 地图配置
+ * @returns {Object} ROS坐标 {x, y}
+ */
+export function leafletToRos(lat, lng, mapConfig) {
+    try {
+        // 检查输入参数的有效性
+        if (lat === undefined || lng === undefined || isNaN(lat) || isNaN(lng)) {
+            console.warn('Leaflet坐标转换错误: 无效的坐标值', { lat, lng })
+            return { x: 0, y: 0 } // 返回默认坐标
+        }
+        
+        // 使用校准后的转换参数（逆向转换）
+        const scaleX = ${params.scaleX}
+        const scaleY = ${params.scaleY}
+        const offsetX = ${params.offsetX}
+        const offsetY = ${params.offsetY}
+        
+        ${params.swapXY ? '// 逆向转换：前端坐标转ROS坐标（考虑XY交换）\n        const x = (lng - offsetX) / scaleX;\n        const y = (lat - offsetY) / scaleY;' : '// 逆向转换：前端坐标转ROS坐标\n        const x = (lng - offsetX) / scaleX;\n        const y = (lat - offsetY) / scaleY;'}
+        
+        // 检查结果是否为有效数字
+        if (isNaN(x) || isNaN(y)) {
+            console.warn('ROS坐标转换结果无效:', { x, y, lat, lng })
+            return { x: 0, y: 0 }
+        }
+        
+        // 检查坐标是否在合理范围内
+        if (Math.abs(x) > 10000 || Math.abs(y) > 10000) {
+            console.warn('ROS坐标转换结果超出合理范围:', { x, y })
+            return { x: 0, y: 0 }
+        }
+        
+        return { x, y }
+    } catch (error) {
+        console.error('Leaflet坐标转换异常:', error)
+        return { x: 0, y: 0 } // 返回安全默认值
+    }
+}`;
+
+            try {
+                // 读取当前mapUtils.js文件
+                const response = await fetch('../src/utils/mapUtils.js');
+                const currentContent = await response.text();
+                
+                // 找到并替换函数
+                const rosToLeafletStart = currentContent.indexOf('export function rosToLeaflet(');
+                const rosToLeafletEnd = currentContent.indexOf('\n}', currentContent.indexOf('return [lat, lng]', rosToLeafletStart)) + 2;
+                
+                const leafletToRosStart = currentContent.indexOf('export function leafletToRos(');
+                const leafletToRosEnd = currentContent.indexOf('\n}', currentContent.indexOf('return { x, y }', leafletToRosStart)) + 2;
+                
+                let newContent = currentContent;
+                
+                if (rosToLeafletStart !== -1 && rosToLeafletEnd !== -1) {
+                    newContent = newContent.substring(0, rosToLeafletStart) + 
+                                rosToLeafletCode + 
+                                newContent.substring(rosToLeafletEnd);
+                }
+                
+                if (leafletToRosStart !== -1 && leafletToRosEnd !== -1) {
+                    // 重新计算位置，因为内容可能已经改变
+                    const newLeafletToRosStart = newContent.indexOf('export function leafletToRos(');
+                    const newLeafletToRosEnd = newContent.indexOf('\n}', newContent.indexOf('return { x, y }', newLeafletToRosStart)) + 2;
+                    
+                    if (newLeafletToRosStart !== -1 && newLeafletToRosEnd !== -1) {
+                        newContent = newContent.substring(0, newLeafletToRosStart) + 
+                                    leafletToRosCode + 
+                                    newContent.substring(newLeafletToRosEnd);
+                    }
+                }
+                
+                // 创建下载链接
+                const blob = new Blob([newContent], { type: 'text/javascript' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'mapUtils.js';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                alert('✅ 已生成更新后的mapUtils.js文件！\n\n请将下载的文件替换：/src/utils/mapUtils.js\n\n然后刷新前端页面查看效果。');
+                
+            } catch (error) {
+                console.error('自动写入失败:', error);
+                alert('❌ 自动写入失败，请手动复制生成的代码。\n\n错误信息：' + error.message);
+            }
+        }
+
+        // 初始化
+        testConversion();
+    </script>
+</body>
+</html>

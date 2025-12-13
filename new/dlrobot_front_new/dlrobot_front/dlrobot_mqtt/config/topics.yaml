@@ -1,0 +1,84 @@
+mqtt:
+  host: localhost                # MQTT 服务器地址（TCP）
+  port: 1883                     # MQTT TCP 端口
+  username: ""                  # 可选账号
+  password: ""                  # 可选密码
+  client_id: dlrobot_mqtt_bridge # 客户端 ID
+  base_topic: ""                # 留空 => MQTT 话题名称保持与 ROS 话题一致
+  keepalive: 60                  # 心跳（秒）
+  tls:
+    enabled: false              # 启用 TLS 时需提供下方证书路径
+    ca_cert: ""
+    certfile: ""
+    keyfile: ""
+  reconnect_delay: 2.0          # 首次重连间隔
+  reconnect_delay_max: 30.0     # 最大重连间隔
+  clean_session: true
+
+subscriptions:
+  - name: map
+    topic: /map
+    type: nav_msgs/OccupancyGrid
+    enabled: true
+    throttle_rate: 1.0    # Hz，上限转发频率
+    qos: 0                # MQTT QoS 等级（0/1/2，可选）
+    retain: false         # 是否使用 retain 标志
+    # mqtt_topic: /custom/map # 若需覆盖默认 MQTT 话题，可取消注释并填写
+    # queue_size: 1           # ROS subscriber 队列长度（默认为 1）
+  - name: amcl_pose
+    topic: /amcl_pose
+    type: geometry_msgs/PoseWithCovarianceStamped
+    enabled: true
+    qos: 0
+    retain: false
+  - name: scan
+    topic: /scan
+    type: sensor_msgs/LaserScan
+    enabled: true
+    throttle_rate: 5.0
+    qos: 0
+    retain: false
+  - name: navigation_status
+    topic: /move_base/status
+    type: actionlib_msgs/GoalStatusArray
+    enabled: true
+    qos: 0
+    retain: false
+  - name: camera_image
+    topic: /camera/image
+    type: sensor_msgs/Image
+    enabled: true
+    image_encoding: bgr8
+    jpeg_quality: 90
+    throttle_rate: 5.0
+    qos: 0
+    retain: false
+  - name: camera_video
+    topic: /camera/video
+    type: sensor_msgs/CompressedImage
+    enabled: false
+    throttle_rate: 1.0
+    qos: 0
+    retain: false
+    mode: web_video_server       # 当启用时，发送 web_video_server 的流信息
+    web_video:
+      topic: /camera/color/image_raw   # 提供给 web_video_server 的图像话题
+      base_url: http://localhost:8080  # web_video_server 地址
+      stream_type: mjpeg
+      width: 640
+      height: 480
+      # quality: 80
+      # bitrate: 500000
+      # snapshot_path: /snapshot
+    # 将 enabled 改为 true 后，后端会转发 topic/web_video_server_url 字段而不是编码图像
+
+commands:
+  - name: manual_cmd_vel
+    mqtt_topic: /robot/manual_cmd_vel
+    ros_topic: /cmd_vel
+    type: geometry_msgs/Twist
+    enabled: true
+    qos: 0
+    queue_size: 1
+    scale_linear: 1.0
+    scale_angular: 1.0

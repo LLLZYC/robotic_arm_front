@@ -1,0 +1,46 @@
+{
+  "name": "dlrobot-front-arm64",
+  "version": "1.0.0",
+  "description": "Vue.js frontend for ROS robot control - ARM64 Ubuntu 18.04 compatible version",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 3000",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 3000",
+    "build:prod": "NODE_OPTIONS='--max-old-space-size=2048' vite build",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.4.0",
+    "buffer": "^6.0.3",
+    "express": "^4.18.2",
+    "leaflet": "^1.9.4",
+    "paho-mqtt": "^1.1.0",
+    "pinia": "^2.1.6",
+    "process": "^0.11.10",
+    "vue": "^3.3.4",
+    "vue-router": "^4.2.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.2.3",
+    "vite": "^4.4.5"
+  },
+  "engines": {
+    "node": ">=14.0.0",
+    "npm": ">=6.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-repo/dlrobot-front.git"
+  },
+  "keywords": [
+    "vue",
+    "ros",
+    "mqtt",
+    "robot",
+    "arm64",
+    "ubuntu"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}

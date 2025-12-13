@@ -1,0 +1,90 @@
+# 巡逻调度参数
+sequence:
+  loop: true
+  idle_wait: 5.0
+  publish_interval: 1.0
+  goal_timeout: 180.0
+  resume_previous_goal: true
+  wait_between_goals: 4.0
+  wait_between_patrols: 600.0
+
+# 关键话题映射
+topics:
+  simple_goal: /move_base/goal
+  move_base_result: /move_base/result
+  cmd_vel: /cmd_vel
+  power_voltage: /PowerVoltage
+
+# 相关服务名称
+services:
+  charge: /set_charge
+  photo_capture: 
+
+# REST 接口：对外接受临时目标
+rest_interface:
+  host: 0.0.0.0
+  port: 17863
+  endpoint: /goal
+  access_token: ""
+  request_timeout: 3.0
+  override_wait_after: 60.0
+  hold_idle_timeout: 60.0
+
+# 拍照与归档参数
+photo_capture:
+  rotation_speed: 0.4
+  rotation_duration: 12.0
+  snapshots: 6
+  snapshot_interval: 2.0
+  archive_directory: /home/dlrobot_autocontrol/archive
+  photo_directory: /home/dlrobot_autocontrol/photos
+  log_extension: .json
+  service_timeout: 5.0
+  wait_before_rotation: 1.5
+  wait_after_rotation: 1.0
+  image_topic: /camera/rgb/image_raw/compressed
+  image_transport: compressed  # 支持 compressed/raw
+  raw_encoding: bgr8
+  image_extension: .jpg
+  min_free_space_mb: 512
+  target_free_space_mb: 1024
+  cleanup_batch_sessions: 3
+  max_image_age_sec: 2.0
+
+# 低电压自动回充参数
+charging:
+  voltage_threshold: 10.0
+  resume_threshold: 23.5
+  debounce_sec: 5.0
+  service_timeout: 5.0
+  service_type: spawn
+  request_on: 1
+  request_off: 0
+  flag_topic: /robot_recharge_flag
+  flag_on: 1
+  flag_off: 0
+  flag_repeats: 10        # 状态切换时重复发布次数，确保监听方接收
+  cancel_topic: /move_base/cancel
+
+auto_recharge:
+  start_service: /auto_recharger/start_auto_recharge
+  service_timeout: 5.0
+
+# 默认姿态与坐标系
+fallback_orientation:
+  yaw: 0.0
+
+frame_id: map
+
+# 巡逻点列表（按顺序循环）
+goals:
+  - name: waypoint_a
+    position: {x: 1.0, y: 0.0, z: 0.0}
+    orientation: {yaw: 0.0}
+    wait_before: 2.0
+    wait_after: 3.0
+  - name: waypoint_b
+    position: {x: 2.5, y: 1.5, z: 0.0}
+    orientation: {yaw: 1.57}
+    wait_before: 2.0
+    wait_after: 3.0

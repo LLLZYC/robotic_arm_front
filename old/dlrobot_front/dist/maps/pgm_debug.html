@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PGM文件调试工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e2e8f0;
+        }
+        .container {
+            background: #2d3748;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            color: #63b3ed;
+        }
+        .info {
+            background: #4a5568;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 6px;
+        }
+        .error {
+            background: #fed7d7;
+            color: #742a2a;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success {
+            background: #c6f6d5;
+            color: #22543d;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .hex-view {
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre;
+            font-size: 12px;
+            line-height: 1.2;
+        }
+        .controls {
+            margin: 10px 0;
+        }
+        button {
+            background: #63b3ed;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #4299e1;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>PGM文件调试工具</h1>
+    
+    <div class="container">
+        <h2>文件信息</h2>
+        <div class="info">
+            <p><strong>文件路径:</strong> <span id="filePath">/maps/DLROBOT.pgm</span></p>
+            <p><strong>文件大小:</strong> <span id="fileSize">-</span> bytes</p>
+            <p><strong>状态:</strong> <span id="status">准备加载...</span></p>
+        </div>
+        
+        <div class="controls">
+            <button onclick="loadPgmFile()">加载PGM文件</button>
+            <button onclick="analyzePgmHeader()">分析文件头</button>
+            <button onclick="convertToPng()">转换为PNG</button>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="container">
+            <h2>文件头分析</h2>
+            <div id="headerInfo">
+                <p>点击"分析文件头"开始分析</p>
+            </div>
+        </div>
+        
+        <div class="container">
+            <h2>十六进制视图</h2>
+            <div class="hex-view" id="hexView">
+                文件内容将显示在这里...
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>图像预览</h2>
+        <div id="imagePreview">
+            <p>转换后的图像将显示在这里</p>
+        </div>
+    </div>
+
+    <script>
+        let pgmData = null;
+        
+        async function loadPgmFile() {
+            try {
+                document.getElementById('status').textContent = '正在加载文件...';
+                
+                const response = await fetch('/maps/DLROBOT.pgm');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const arrayBuffer = await response.arrayBuffer();
+                pgmData = new Uint8Array(arrayBuffer);
+                
+                document.getElementById('fileSize').textContent = pgmData.length;
+                document.getElementById('status').textContent = '文件加载成功';
+                
+                // 显示十六进制视图
+                displayHexView(pgmData);
+                
+            } catch (error) {
+                document.getElementById('status').textContent = '加载失败: ' + error.message;
+                console.error('文件加载失败:', error);
+            }
+        }
+        
+        function displayHexView(data) {
+            const hexView = document.getElementById('hexView');
+            let hexContent = '';
+            const bytesPerLine = 16;
+            
+            for (let i = 0; i < Math.min(data.length, 512); i += bytesPerLine) {
+                // 行号
+                hexContent += i.toString(16).padStart(4, '0') + ': ';
+                
+                // 十六进制字节
+                for (let j = 0; j < bytesPerLine; j++) {
+                    if (i + j < data.length) {
+                        hexContent += data[i + j].toString(16).padStart(2, '0') + ' ';
+                    } else {
+                        hexContent += '   ';
+                    }
+                }
+                
+                hexContent += ' ';
+                
+                // ASCII 字符
+                for (let j = 0; j < bytesPerLine; j++) {
+                    if (i + j < data.length) {
+                        const byte = data[i + j];
+                        hexContent += (byte >= 32 && byte <= 126) ? String.fromCharCode(byte) : '.';
+                    } else {
+                        hexContent += ' ';
+                    }
+                }
+                
+                hexContent += '\n';
+            }
+            
+            hexView.textContent = hexContent;
+        }
+        
+        function analyzePgmHeader() {
+            if (!pgmData) {
+                alert('请先加载PGM文件');
+                return;
+            }
+            
+            const headerInfo = parsePgmHeader(pgmData);
+            displayHeaderInfo(headerInfo);
+        }
+        
+        function parsePgmHeader(data) {
+            try {
+                console.log('开始解析PGM文件头，文件大小:', data.length, 'bytes');
+                
+                // 检查文件头标识
+                const magicNumber = String.fromCharCode(data[0], data[1]);
+                console.log('PGM格式标识:', magicNumber);
+                
+                if (magicNumber !== 'P5') {
+                    return { error: `不支持的PGM格式，期望P5，实际: ${magicNumber}` };
+                }
+                
+                // 解析文件头
+                let offset = 2;
+                
+                // 跳过可能的空白字符和注释
+                while (offset < data.length) {
+                    const char = data[offset];
+                    
+                    // 跳过空白字符
+                    if (char === 32 || char === 9 || char === 10 || char === 13) {
+                        offset++;
+                        continue;
+                    }
+                    
+                    // 跳过注释行
+                    if (char === 35) { // '#'
+                        while (offset < data.length && data[offset] !== 10 && data[offset] !== 13) {
+                            offset++;
+                        }
+                        continue;
+                    }
+                    
+                    // 开始解析数字
+                    break;
+                }
+                
+                // 读取宽度
+                let widthStr = '';
+                while (offset < data.length && data[offset] >= 48 && data[offset] <= 57) {
+                    widthStr += String.fromCharCode(data[offset]);
+                    offset++;
+                }
+                
+                // 跳过空白字符
+                while (offset < data.length && (data[offset] === 32 || data[offset] === 9 || data[offset] === 10 || data[offset] === 13)) {
+                    offset++;
+                }
+                
+                // 读取高度
+                let heightStr = '';
+                while (offset < data.length && data[offset] >= 48 && data[offset] <= 57) {
+                    heightStr += String.fromCharCode(data[offset]);
+                    offset++;
+                }
+                
+                // 跳过空白字符
+                while (offset < data.length && (data[offset] === 32 || data[offset] === 9 || data[offset] === 10 || data[offset] === 13)) {
+                    offset++;
+                }
+                
+                // 读取最大值
+                let maxValueStr = '';
+                while (offset < data.length && data[offset] >= 48 && data[offset] <= 57) {
+                    maxValueStr += String.fromCharCode(data[offset]);
+                    offset++;
+                }
+                
+                // 跳过空白字符，找到数据开始位置
+                while (offset < data.length && (data[offset] === 32 || data[offset] === 9 || data[offset] === 10 || data[offset] === 13)) {
+                    offset++;
+                }
+                
+                const width = parseInt(widthStr);
+                const height = parseInt(heightStr);
+                const maxValue = parseInt(maxValueStr);
+                
+                console.log('解析结果:', { width, height, maxValue, offset });
+                
+                if (isNaN(width) || isNaN(height) || isNaN(maxValue)) {
+                    return { error: `PGM文件头解析失败: width=${width}, height=${height}, maxValue=${maxValue}` };
+                }
+                
+                // 验证数据大小
+                const expectedDataSize = width * height;
+                const actualDataSize = data.length - offset;
+                
+                console.log('数据大小验证 - 期望:', expectedDataSize, '实际:', actualDataSize);
+                
+                if (actualDataSize < expectedDataSize) {
+                    return { error: `PGM数据大小不匹配，期望: ${expectedDataSize}, 实际: ${actualDataSize}` };
+                }
+                
+                return { 
+                    success: true,
+                    width, 
+                    height, 
+                    maxValue, 
+                    dataOffset: offset,
+                    magicNumber,
+                    expectedDataSize,
+                    actualDataSize
+                };
+                
+            } catch (error) {
+                return { error: `解析异常: ${error.message}` };
+            }
+        }
+        
+        function displayHeaderInfo(headerInfo) {
+            const headerDiv = document.getElementById('headerInfo');
+            
+            if (headerInfo.error) {
+                headerDiv.innerHTML = `
+                    <div class="error">
+                        <strong>解析失败:</strong> ${headerInfo.error}
+                    </div>
+                `;
+            } else {
+                headerDiv.innerHTML = `
+                    <div class="success">
+                        <strong>解析成功!</strong>
+                        <p><strong>格式:</strong> ${headerInfo.magicNumber}</p>
+                        <p><strong>宽度:</strong> ${headerInfo.width} 像素</p>
+                        <p><strong>高度:</strong> ${headerInfo.height} 像素</p>
+                        <p><strong>最大值:</strong> ${headerInfo.maxValue}</p>
+                        <p><strong>数据偏移:</strong> ${headerInfo.dataOffset} 字节</p>
+                        <p><strong>期望数据大小:</strong> ${headerInfo.expectedDataSize} 字节</p>
+                        <p><strong>实际数据大小:</strong> ${headerInfo.actualDataSize} 字节</p>
+                    </div>
+                `;
+            }
+        }
+        
+        async function convertToPng() {
+            if (!pgmData) {
+                alert('请先加载PGM文件');
+                return;
+            }
+            
+            try {
+                const headerInfo = parsePgmHeader(pgmData);
+                if (headerInfo.error) {
+                    alert('无法转换: ' + headerInfo.error);
+                    return;
+                }
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = headerInfo.width;
+                canvas.height = headerInfo.height;
+                const ctx = canvas.getContext('2d');
+                
+                // 创建图像数据
+                const imageData = ctx.createImageData(headerInfo.width, headerInfo.height);
+                
+                // 转换PGM数据为RGBA
+                const dataOffset = headerInfo.dataOffset;
+                
+                for (let y = 0; y < headerInfo.height; y++) {
+                    for (let x = 0; x < headerInfo.width; x++) {
+                        const pgmIndex = dataOffset + y * headerInfo.width + x;
+                        const rgbaIndex = (y * headerInfo.width + x) * 4;
+                        
+                        if (pgmIndex < pgmData.length) {
+                            const grayValue = pgmData[pgmIndex];
+                            
+                            // 根据阈值设置颜色
+                            if (grayValue < 50) {
+                                // 障碍物 - 黑色
+                                imageData.data[rgbaIndex] = 0;
+                                imageData.data[rgbaIndex + 1] = 0;
+                                imageData.data[rgbaIndex + 2] = 0;
+                                imageData.data[rgbaIndex + 3] = 255;
+                            } else if (grayValue > 200) {
+                                // 自由空间 - 白色
+                                imageData.data[rgbaIndex] = 255;
+                                imageData.data[rgbaIndex + 1] = 255;
+                                imageData.data[rgbaIndex + 2] = 255;
+                                imageData.data[rgbaIndex + 3] = 255;
+                            } else {
+                                // 未知区域 - 灰色
+                                imageData.data[rgbaIndex] = 128;
+                                imageData.data[rgbaIndex + 1] = 128;
+                                imageData.data[rgbaIndex + 2] = 128;
+                                imageData.data[rgbaIndex + 3] = 255;
+                            }
+                        }
+                    }
+                }
+                
+                ctx.putImageData(imageData, 0, 0);
+                const pngDataUrl = canvas.toDataURL('image/png');
+                
+                // 显示图像
+                const previewDiv = document.getElementById('imagePreview');
+                previewDiv.innerHTML = `
+                    <div class="success">
+                        <p><strong>转换成功!</strong> 图像尺寸: ${headerInfo.width} × ${headerInfo.height}</p>
+                        <img src="${pngDataUrl}" alt="转换后的地图" style="max-width: 100%; border: 1px solid #ccc;">
+                    </div>
+                `;
+                
+            } catch (error) {
+                alert('转换失败: ' + error.message);
+                console.error('转换失败:', error);
+            }
+        }
+        
+        // 页面加载时自动加载文件
+        window.addEventListener('load', loadPgmFile);
+    </script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+<launch>
+  <arg name="config_file" default="$(find dlrobot_autocontrol)/config/autocontrol.yaml" />
+
+  <node pkg="dlrobot_autocontrol" type="autocontrol_node.py" name="dlrobot_autocontrol" output="screen">
+    <param name="config_file" value="$(arg config_file)" />
+  </node>
+</launch>
