@@ -1,53 +1,122 @@
-# hole_insertion
+# DLRobot Frontend
 
-自动插孔流程节点（s300_pro + eco65）：读取初始关节位姿，等待导航触发后调用视觉服务获取孔位姿（camera_link），生成预靠位，直线插入、撤回并回初始，力控保护可选，旋转接口预留。
+Vue.js前端应用，用于ROS机器人控制系统。支持地图导航、巡航控制、相机图像库、热成像和机械臂控制。
 
-## 用法
+## 功能特性
+
+- 🗺️ **地图导航**: 实时显示机器人位置和地图，支持点击设置目标位置
+- 🚗 **巡航控制**: 预设巡航点自动导航
+- 📷 **相机图像库**: 显示和下载相机捕获的图像
+- 🌡️ **热成像**: 实时热成像数据显示
+- 🦾 **机械臂控制**: 机械臂姿态控制和操作
+- 📡 **MQTT通信**: 与ROS后端通过MQTT进行实时通信
+- 🎨 **响应式设计**: 支持桌面和移动设备
+
+## 技术栈
+
+- **前端框架**: Vue 3 + Composition API
+- **状态管理**: Pinia
+- **路由**: Vue Router 4
+- **地图**: Leaflet
+- **通信**: Paho MQTT (WebSocket)
+- **HTTP客户端**: Axios
+- **构建工具**: Vite
+- **样式**: CSS3 + Flexbox/Grid
+
+## 快速开始
+
+### 安装依赖
 
 ```bash
-colcon build --packages-select hole_insertion
-source install/setup.bash
-ros2 launch hole_insertion hole_insertion.launch.py
+npm install
 ```
 
-导航到位后调用开始服务：
+### 开发模式
+
 ```bash
-ros2 service call /start_insertion std_srvs/srv/Trigger "{}"
+npm run dev
 ```
 
-视觉服务需要实现 `hole_insertion/srv/GetHolePose` 接口并在 `vision_service_name` 参数指定的名称上提供服务。默认参数在 `config/params.yaml`。
+应用将在 `http://localhost:3000` 启动（如果端口被占用，会自动使用其他端口）。
 
-旋转占位服务（暂未实现旋转逻辑）：
+### 构建生产版本
+
 ```bash
-ros2 service call /rotate_in_hole hole_insertion/srv/RotateInHole "{angle: 1.57, speed: 0.5}"
+npm run build
 ```
 
-手动触发（无需视觉服务，直接给相机坐标系下的孔位姿）：
+### 预览生产版本
+
 ```bash
-ros2 service call /run_insertion_manual hole_insertion/srv/RunInsertionManual "{
-  pose_cam: {
-    header: {frame_id: 'camera_link'},
-    pose: {
-      position: {x: 0.1, y: 0.0, z: 0.3},
-      orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
-    }
-  }
-}"
+npm run preview
 ```
 
-## 关键参数（config/params.yaml）
-- `initial_joints`：初始关节角，节点启动时会移动到此姿态。`initial_joints_in_degrees` 为 true 时按度数解析，否则按弧度解析。
-- `pre_dock_distance`：固定预靠距离，沿孔的 +Z 轴反向偏移。
-- `auto_pre_dock_from_depth`：true 时根据相机坐标系下的孔深度自动计算预靠距离（depth - `pre_dock_margin`，下限 `pre_dock_min_distance`）。
-- `insert_depth`：插入深度，沿孔的 +Z 轴正向推进。
-- `withdraw_distance`：撤出距离，默认为与预靠相同。
-- `linear_step`：直线插补步长，越小越稳。
-- `cartesian_speed_scale` / `cartesian_accel_scale`：MoveIt 的速度/加速度缩放。
-- `use_force_guard` / `force_guard_threshold`：可选的力阈值保护，订阅 `force_topic`。
-- `vision_service_name`：视觉服务名（GetHolePose）。
-- `trigger_vision`：现在 `/start_insertion` 会调用 `trigger_service_name`（默认 `/trigger_vision`，std_srvs/Trigger），然后等待 `/process_pose` 推送 PoseStamped；超时时间由 `trigger_timeout`、`pose_wait_timeout` 控制。`/process_pose` 到的姿态总是用当前时间戳缓存。
-- `/process_pose`：兼容 `robotic_arm` 的 ProcessPose 服务（相机坐标系 Pose -> 缓存），当 `accept_cached_process_pose` 为 true 且视觉服务不可用时，会使用缓存姿态。
-- `camera_frame` / `base_frame`：孔位姿输入坐标系与规划参考系。
+## 配置
+
+### MQTT连接
+
+默认连接到 `ws://localhost:9001`。可在设置面板中修改。
+
+### REST API
+
+默认连接到 `http://localhost:5001`。可在设置面板中修改。
+
+### 地图配置
+
+地图分辨率、原点坐标等可在设置面板中配置。
+
+## 项目结构
+
+```
+src/
+├── components/          # Vue组件
+│   ├── ControlPanel.vue # 控制面板
+│   ├── RobotMap.vue     # 机器人地图
+│   ├── CruiseControl.vue# 巡航控制
+│   ├── CameraGallery.vue# 相机图像库
+│   ├── ThermalDisplay.vue# 热成像显示
+│   ├── ArmControl.vue   # 机械臂控制
+│   └── ...
+├── stores/              # Pinia状态管理
+│   └── robotStore.js    # 机器人状态
+├── services/            # 服务层
+│   ├── mqttService.js   # MQTT通信服务
+│   ├── apiService.js    # REST API服务
+│   └── ...
+├── utils/               # 工具函数
+│   ├── mapUtils.js      # 地图工具
+│   └── ...
+├── views/               # 页面视图
+├── router/              # 路由配置
+└── main.js              # 应用入口
+```
+
+## 开发指南
+
+### 添加新组件
+
+1. 在 `src/components/` 创建Vue组件
+2. 在 `src/App.vue` 中导入并注册
+3. 在模板中使用
+
+### 添加新服务
+
+在 `src/services/` 中创建服务类，实现相关功能。
+
+### 状态管理
+
+使用Pinia进行状态管理。主要状态存储在 `robotStore.js` 中。
+
+## 浏览器支持
+
+- Chrome 70+
+- Firefox 65+
+- Safari 12+
+- Edge 79+
+
+## 许可证
+
+MIT License
 - 深度可选：`use_depth_topic`（开启从深度图取孔中心距离）、`depth_topic`、`camera_info_topic`、`depth_timeout`、`depth_window`。取到的深度会替代 vision Pose 的 z 来计算预靠距离（depth - `pre_dock_margin`，下限 `pre_dock_min_distance`），取不到则回退到 vision z。
 
 ## 零基础快速配置（一步一步）

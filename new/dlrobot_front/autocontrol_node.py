@@ -15,8 +15,16 @@ from urllib.parse import parse_qs, unquote, urlparse
 import rospy
 import yaml
 from actionlib_msgs.msg import GoalID, GoalStatus
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, Twist, Point
 from move_base_msgs.msg import MoveBaseActionGoal, MoveBaseActionResult
+from std_msgs.msg import Header
+
+# 定义无法到达目标消息类型
+class UnreachableGoal:
+    def __init__(self):
+        self.header = Header()
+        self.goal_name = ""
+        self.position = Point()
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import Float32, Int8
 from std_srvs.srv import Trigger, TriggerRequest
@@ -306,8 +314,14 @@ class RestApiServer(threading.Thread):
                     elif path in ("/api/navigation/hold", "/api/goal/hold"):
                         success, message, status = node.hold_position(payload)
                         self._send_json(status, {"success": success, "message": message})
+                    elif path in ("/api/navigation/start", "/api/goal/start"):
+                        success, message, status = node.start_cruise(payload)
+                        self._send_json(status, {"success": success, "message": message})
+                    elif path in ("/api/navigation/pause", "/api/goal/pause"):
+                        success, message, status = node.pause_navigation(payload)
+                        self._send_json(status, {"success": success, "message": message})
                     elif path in ("/api/navigation/resume", "/api/goal/resume"):
-                        success, message, status = node.resume_schedule(payload)
+                        success, message, status = node.resume_navigation(payload)
                         self._send_json(status, {"success": success, "message": message})
                     elif path.rstrip("/") == "/api/navigation/default_goals":
                         success, result, status = node.update_default_goals(payload)
@@ -443,6 +457,7 @@ class AutoControlNode:
         else:
             self._simple_goal_pub = rospy.Publisher(self._simple_goal_topic, PoseStamped, queue_size=1)
         self._cmd_vel_pub = rospy.Publisher(self._topics.get("cmd_vel", "/cmd_vel"), Twist, queue_size=10)
+        self._unreachable_pub = rospy.Publisher(self._topics.get("unreachable_goal", "/navigation/unreachable_goal"), UnreachableGoal, queue_size=10)
         result_topic = self._topics.get("move_base_result", "/move_base/result")
         self._result_sub = rospy.Subscriber(result_topic, MoveBaseActionResult, self._result_callback, queue_size=10)
         voltage_topic = self._topics.get("power_voltage", "/PowerVoltage")
@@ -507,6 +522,11 @@ class AutoControlNode:
         self._active_goal_deadline = rospy.Time(0)
         self._charging_suspended = False
         self._charging_inhibit_until = 0.0
+        
+        # 暂停相关状态
+        self._pause_active: bool = False  # 暂停状态标志
+        self._pause_saved_index: Optional[int] = None  # 暂停时保存的巡航点索引
+        self._pause_saved_goal: Optional[Goal] = None  # 暂停时保存的当前目标
         self._last_charge_call = 0.0
         self._post_goal_busy = False
         self._goal_seq = 0
@@ -696,60 +716,108 @@ class AutoControlNode:
             self._hold_active = True
             self._hold_triggered_recharge = False
             self._hold_last_activity = now_ts
-            active_goal = self._active_goal
-            if active_goal and active_goal.source == "sequence" and self._resume_previous_goal:
-                self._pending_goal = active_goal
-            else:
-                self._pending_goal = None
-            self._active_goal = None
-            self._active_goal_deadline = rospy.Time(0)
-            self._active_goal_sent = rospy.Time(0)
-            self._post_goal_busy = False
-            self._override_goals.clear()
+            
+            # 清除所有目标和队列
+            self._clear_all_goals_locked()
+            
+            # 重置所有状态
+            self._reset_all_states_locked()
+            
+            # 重新设置保持状态
+            self._hold_active = True
+            self._hold_triggered_recharge = False
+            self._hold_last_activity = now_ts
+            
             self._goal_available.notify_all()
-        rospy.loginfo("Navigation hold engaged (idle timeout %.1fs)", idle_timeout)
+        rospy.loginfo("Navigation hold engaged (idle timeout %.1fs), all queues cleared", idle_timeout)
         self._bump_metric("hold_requests")
         if self._cancel_pub:
             self._cancel_pub.publish(GoalID())
         self._cmd_vel_pub.publish(Twist())
         return True, f"hold engaged, idle timeout {idle_timeout:.1f}s", 200
 
-    def resume_schedule(self, payload: Optional[Dict[str, Any]]) -> Tuple[bool, str, int]:
-        clear_overrides = False
+    def start_cruise(self, payload: Optional[Dict[str, Any]]) -> Tuple[bool, str, int]:
+        """开始巡航功能，确保清除所有队列中的点并从头开始巡航"""
         trigger_recharge = False
         stop_charging = False
         charging_was_suspended = False
         if isinstance(payload, dict):
-            clear_overrides = bool(payload.get("clear_overrides", False))
             trigger_recharge = bool(payload.get("trigger_auto_recharge", False))
             stop_charging = bool(payload.get("stop_auto_recharge", False))
         with self._goal_available:
-            was_hold = self._hold_active or self._hold_triggered_recharge
-            if clear_overrides:
-                self._override_goals.clear()
-            self._hold_active = False
-            self._hold_triggered_recharge = False
-            self._hold_last_activity = time.time()
+            # 清除所有目标和队列
+            self._clear_all_goals_locked()
+            
+            # 重置所有状态
+            self._reset_all_states_locked()
+            
             charging_was_suspended = self._charging_suspended
             self._goal_available.notify_all()
-        self._bump_metric("resume_requests")
-        rospy.loginfo(
-            "Resume requested (clear_overrides=%s, trigger_auto_recharge=%s, was_hold=%s)",
-            clear_overrides,
-            trigger_recharge,
-            was_hold,
-        )
+        self._bump_metric("start_cruise_requests")
+        rospy.loginfo("开始巡航，所有队列已清除，将从第一个巡航点开始")
         if stop_charging:
-            rospy.loginfo("Resume request includes stop_auto_recharge flag")
-            self._deactivate_charging(manual=True, reason="resume_stop")
+            rospy.loginfo("开始巡航请求包含停止自动充电标志")
+            self._deactivate_charging(manual=True, reason="start_cruise_stop")
         elif charging_was_suspended and not trigger_recharge:
-            rospy.loginfo("Charging suspension cleared due to resume request")
-            self._deactivate_charging(manual=True, reason="resume_release")
+            rospy.loginfo("由于开始巡航请求，清除充电暂停状态")
+            self._deactivate_charging(manual=True, reason="start_cruise_release")
         if trigger_recharge:
             self._trigger_auto_recharge()
-        if was_hold:
-            return True, "resume acknowledged", 200
-        return True, "no hold active", 200
+        return True, "巡航已开始", 200
+        
+    def pause_navigation(self, payload: Optional[Dict[str, Any]]) -> Tuple[bool, str, int]:
+        """暂停导航，保留所有队列但停止移动"""
+        with self._goal_available:
+            # 保存当前状态
+            self._pause_active = True
+            self._pause_saved_index = self._goal_index
+            self._pause_saved_goal = self._active_goal
+            
+            # 停止移动但不清除队列
+            self._active_goal = None
+            self._active_goal_deadline = rospy.Time(0)
+            self._active_goal_sent = rospy.Time(0)
+            self._post_goal_busy = False
+            
+            # 不清除任何队列！
+            # self._override_goals.clear()  # 注释掉这行
+            # self._pending_goal = None      # 注释掉这行
+            
+            self._goal_available.notify_all()
+        
+        # 发送停止命令
+        if self._cancel_pub:
+            self._cancel_pub.publish(GoalID())
+        self._cmd_vel_pub.publish(Twist())
+        
+        rospy.loginfo("导航已暂停，所有队列保留")
+        return True, "导航已暂停，所有队列保留", 200
+        
+    def resume_navigation(self, payload: Optional[Dict[str, Any]]) -> Tuple[bool, str, int]:
+        """恢复导航，从暂停点继续"""
+        with self._goal_available:
+            if not self._pause_active:
+                return False, "当前没有暂停的导航", 400
+            
+            # 恢复状态
+            self._pause_active = False
+            
+            # 恢复巡航点索引
+            if self._pause_saved_index is not None:
+                self._goal_index = self._pause_saved_index
+            
+            # 恢复当前目标
+            if self._pause_saved_goal:
+                self._active_goal = self._pause_saved_goal
+            
+            # 清除保存的状态
+            self._pause_saved_index = None
+            self._pause_saved_goal = None
+            
+            self._goal_available.notify_all()
+        
+        rospy.loginfo("导航已恢复，从暂停点继续")
+        return True, "导航已恢复，从暂停点继续", 200
 
     def _goal_to_dict(self, goal: Optional[Goal]) -> Optional[Dict[str, Any]]:
         if not goal:
@@ -781,12 +849,26 @@ class AutoControlNode:
             "goals": serialized,
         }
         tmp_path = f"{self._goal_store_path}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as handle:
-            try:
-                yaml.safe_dump(payload, handle, allow_unicode=False, sort_keys=False)
-            except TypeError:
-                yaml.safe_dump(payload, handle, allow_unicode=False)
-        os.replace(tmp_path, self._goal_store_path)
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                try:
+                    yaml.safe_dump(payload, handle, allow_unicode=False, sort_keys=False)
+                except TypeError:
+                    yaml.safe_dump(payload, handle, allow_unicode=False)
+            # 确保文件写入磁盘
+            handle.flush()
+            os.fsync(handle.fileno())
+            # 原子性替换文件
+            os.replace(tmp_path, self._goal_store_path)
+            rospy.loginfo(f"成功保存巡航点配置到 {self._goal_store_path}")
+        except Exception as exc:
+            rospy.logerr(f"保存巡航点配置失败: {exc}")
+            # 清理临时文件
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
     def _load_runtime_goals(self) -> Optional[List[Goal]]:
         if not self._goal_store_path or not os.path.isfile(self._goal_store_path):
@@ -1249,7 +1331,44 @@ class AutoControlNode:
                 self._dispatch_goal(goal)
             rate.sleep()
 
+    def _clear_all_goals_locked(self) -> None:
+        """清除所有活动目标和队列
+
+        This method must be called with _goal_available locked.
+        """
+        self._active_goal = None
+        self._pending_goal = None
+        self._override_goals.clear()
+        self._goal_index = 0
+        
+    def _reset_all_states_locked(self) -> None:
+        """重置所有状态标志
+        
+        This method must be called with _goal_available locked.
+        """
+        # 重置保持状态
+        self._hold_active = False
+        self._hold_triggered_recharge = False
+        self._hold_last_activity = time.time()
+        
+        # 重置暂停状态
+        self._pause_active = False
+        self._pause_saved_index = None
+        self._pause_saved_goal = None
+        
+        # 重置其他状态
+        self._active_goal_deadline = rospy.Time(0)
+        self._active_goal_sent = rospy.Time(0)
+        self._post_goal_busy = False
+        
     def _pick_next_goal_locked(self) -> Optional[Goal]:
+        # 如果处于暂停状态，不选择新目标
+        if self._pause_active:
+            return None
+            
+        # 检查队列同步
+        self._check_queue_sync_locked()
+            
         if self._override_goals:
             return self._override_goals.popleft()
         if self._pending_goal:
@@ -1261,12 +1380,66 @@ class AutoControlNode:
             self._goal_index += 1
             return goal
         if self._loop_sequence and self._default_goals:
-            self._goal_index = 1 if self._default_goals else 0
+            self._goal_index = 0  # 修复bug，应该是0而不是1
             return self._default_goals[0]
         return None
+        
+    def _check_queue_sync_locked(self) -> None:
+        """检查队列同步状态，确保索引和队列一致
+        
+        This method must be called with _goal_available locked.
+        """
+        # 检查索引是否超出范围
+        if self._goal_index > len(self._default_goals):
+            rospy.logwarn(f"巡航点索引 {self._goal_index} 超出范围，重置为0")
+            self._goal_index = 0
+        
+        # 检查是否有活动目标但没有发送时间
+        if self._active_goal and self._active_goal_sent == rospy.Time(0):
+            rospy.logwarn("检测到活动目标但没有发送时间，清除活动目标")
+            self._active_goal = None
+            
+    def _log_queue_status_locked(self) -> None:
+        """记录队列状态，用于调试和监控
+        
+        This method must be called with _goal_available locked.
+        """
+        rospy.logdebug(
+            "队列状态: 活动目标=%s, 待处理目标=%s, 临时目标数=%d, 巡航点索引=%d/%d, 暂停=%s, 保持=%s",
+            self._active_goal.name if self._active_goal else "None",
+            self._pending_goal.name if self._pending_goal else "None",
+            len(self._override_goals),
+            self._goal_index,
+            len(self._default_goals),
+            self._pause_active,
+            self._hold_active
+        )
+        
+    def _publish_unreachable_goal(self, goal: Goal) -> None:
+        """发布无法到达的目标事件
+        
+        This method publishes an event that the frontend can listen to
+        and display a notification about the unreachable goal.
+        """
+        try:
+            # 创建无法到达目标消息
+            msg = UnreachableGoal()
+            msg.goal_name = goal.name
+            msg.position.x = goal.pose_stamped().pose.position.x
+            msg.position.y = goal.pose_stamped().pose.position.y
+            msg.header.stamp = rospy.Time.now()
+            msg.header.frame_id = "map"
+            
+            # 发布消息
+            if hasattr(self, "_unreachable_pub") and self._unreachable_pub:
+                self._unreachable_pub.publish(msg)
+                rospy.loginfo("已发布无法到达目标事件: %s", goal.name)
+        except Exception as e:
+            rospy.logerr("发布无法到达目标事件失败: %s", str(e))
 
     def _dispatch_goal(self, goal: Goal) -> None:
         rospy.loginfo("Dispatching goal %s (%s)", goal.name, goal.source)
+        self._log_queue_status_locked()
         if goal.wait_before > 0.0:
             self._timed_sleep(goal.wait_before)
         msg = goal.pose_stamped()
@@ -1313,10 +1486,18 @@ class AutoControlNode:
                 rospy.logwarn("Goal %s failed with status %d", goal.name, status)
                 self._active_goal = None
                 self._active_goal_deadline = rospy.Time(0)
-                if goal.source == "sequence":
+                
+                # 处理无法到达的情况
+                if status in [GoalStatus.REJECTED, GoalStatus.ABORTED, GoalStatus.PREEMPTED]:
+                    rospy.logwarn("路径点 %s 无法到达，已跳过，请检查是否有杂物阻挡", goal.name)
+                    # 发布无法到达事件，前端可以监听并显示
+                    self._publish_unreachable_goal(goal)
+                    # 不再重试该目标，直接跳过
+                elif goal.source == "sequence":
                     self._pending_goal = goal
                 else:
                     self._override_goals.append(goal)
+                
                 self._goal_available.notify_all()
         if status == GoalStatus.SUCCEEDED:
             self._handle_success(goal)

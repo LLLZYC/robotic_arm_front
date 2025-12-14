@@ -102,11 +102,15 @@ export function rosToLeaflet(x, y) {
       return [0, 0] // 返回默认坐标
     }
     
-    // 使用简单的缩放转换，保持与原来的一致性
+    // 使用与地图配置一致的缩放因子
     const scale = 0.001  // 缩放因子，与原来保持一致
+
+    // 确保坐标在合理范围内
+    const boundedX = Math.max(-100, Math.min(100, x))
+    const boundedY = Math.max(-100, Math.min(100, y))
     
-    const lat = y * scale      // ROS Y -> Leaflet lat
-    const lng = x * scale      // ROS X -> Leaflet lng
+    const lat = boundedY * scale      // ROS Y -> Leaflet lat
+    const lng = boundedX * scale      // ROS X -> Leaflet lng
     
     console.log('ROS坐标转换:', {
       ros: { x, y },
@@ -153,10 +157,10 @@ export function leafletToRos(lat, lng) {
     const x = lng / scale  // Leaflet lng -> ROS X
     const y = lat / scale  // Leaflet lat -> ROS Y
     
-    console.log('Leaflet坐标转换:', {
-      leaflet: { lat, lng },
-      ros: { x, y }
-    })
+    // console.log('Leaflet坐标转换:', {
+    //   leaflet: { lat, lng },
+    //   ros: { x, y }
+    // })
     
     // 检查结果是否为有效数字
     if (isNaN(x) || isNaN(y)) {

@@ -1,6 +1,7 @@
 import { Client, Message } from 'paho-mqtt'
 import { useRobotStore } from '../stores/robotStore'
 import webVideoService from './webVideoService'
+import unreachableGoalService from './unreachableGoalService'
 
 class MQTTService {
   constructor() {
@@ -14,6 +15,8 @@ class MQTTService {
   initStore() {
     if (!this.robotStore) {
       this.robotStore = useRobotStore()
+      // 初始化无法到达目标服务
+      unreachableGoalService.initStore(this.robotStore)
       // 注册默认的消息处理器
       this.registerDefaultHandlers()
     }
@@ -29,6 +32,7 @@ class MQTTService {
       this.registerHandler('/robot_pose', this.handlePoseData.bind(this))
       this.registerHandler('/scan', this.handleLaserScan.bind(this))
       this.registerHandler('/move_base/status', this.handleNavigationStatus.bind(this))
+      this.registerHandler('/navigation/unreachable_goal', unreachableGoalService.handleUnreachableGoal.bind(unreachableGoalService))
       this.registerHandler('/camera/image', this.handleCameraImage.bind(this))
       this.registerHandler('/camera/video', this.handleVideoStream.bind(this))
       return
@@ -250,32 +254,65 @@ class MQTTService {
         return
       }
       
-      console.log(`MQTT收到消息: ${topic}, 长度: ${message.length}`)
-      
-      const handler = this.messageHandlers.get(topic)
+      // console.log(`MQTT收到消息: ${topic}, 长度: ${message.length}`)
+
+      // 尝试直接匹配注册的处理器（精确匹配），如果未命中则尝试多种回退匹配策略
+      let handler = this.messageHandlers.get(topic)
+      let matchedTopic = topic
+      if (!handler) {
+        // 尝试去掉/或加上前导斜杠
+        const alt1 = topic.replace(/^\//, '')
+        const alt2 = ('/' + topic).replace('//', '/')
+        handler = this.messageHandlers.get(alt1) || this.messageHandlers.get(alt2)
+        if (handler) matchedTopic = this.messageHandlers.has(alt1) ? alt1 : alt2
+      }
+
+      if (!handler) {
+        // 尝试按话题最后一段进行匹配（例如 /map/pose -> pose）
+        const lastSegment = topic.split('/').filter(Boolean).pop()
+        for (const key of this.messageHandlers.keys()) {
+          if (!key) continue
+          const kLast = key.split('/').filter(Boolean).pop()
+          if (kLast && lastSegment && kLast === lastSegment) {
+            handler = this.messageHandlers.get(key)
+            matchedTopic = key
+            break
+          }
+        }
+      }
+
+      if (!handler) {
+        // 尝试模糊包含匹配
+        for (const key of this.messageHandlers.keys()) {
+          if (topic.includes(key) || key.includes(topic)) {
+            handler = this.messageHandlers.get(key)
+            matchedTopic = key
+            break
+          }
+        }
+      }
+
       if (handler) {
         let parsedData
         
         // 特殊处理 /scan 主题的消息，处理 Infinity 值
-        if (topic === '/scan') {
+        if (topic === '/scan' || matchedTopic === '/scan') {
           try {
             // 首先尝试标准JSON解析
             parsedData = JSON.parse(message)
           } catch (jsonError) {
             // 如果标准解析失败，尝试清理 Infinity 值
-            console.warn(`/scan 消息JSON解析失败，尝试清理 Infinity 值: ${jsonError.message}`)
             
-            // 清理 Infinity 值，将其替换为 null 或大数值
-            const cleanedMessage = message.replace(/Infinity/g, 'null')
+            // 修复: 使用更精确的正则，只替换作为值的 Infinity
+            const cleanedMessage = message.replace(/:\s*Infinity\b/g, ': null')
             
             try {
               parsedData = JSON.parse(cleanedMessage)
-              console.log('成功清理并解析 /scan 消息')
+              // console.log('成功清理并解析 /scan 消息')
             } catch (cleanError) {
               console.error(`清理后仍无法解析 /scan 消息: ${cleanError.message}`)
               
               // 如果清理后仍然失败，尝试手动解析激光雷达数据格式
-              // 假设格式为：时间戳,距离1,距离2,...
               if (message.includes(',')) {
                 const parts = message.split(',')
                 const ranges = parts.slice(1).map(val => {
@@ -295,16 +332,32 @@ class MQTTService {
             }
           }
         } else {
-          // 其他主题使用标准JSON解析
-          parsedData = JSON.parse(message)
+          // 其他主题使用标准JSON解析，宽松处理
+          try {
+            parsedData = JSON.parse(message)
+          } catch (e) {
+            // 有些后端可能发送单行 key=value 或裸数字，尝试做简单解析
+            try {
+              // 去掉首尾引号
+              const s = message.trim().replace(/^\"|\"$/g, '')
+              parsedData = JSON.parse(s)
+            } catch (e2) {
+              // 作为最后手段，包装为 text 字段
+              parsedData = { text: message }
+            }
+          }
         }
         
-        // 为数据添加话题信息，便于处理器区分来源
-        parsedData._topic = topic
-        
-        handler(parsedData)
+        // 为数据添加话题信息，便于处理器区分来源（使用匹配到的话题键）
+        parsedData._topic = matchedTopic || topic
+
+        try {
+          handler(parsedData)
+        } catch (err) {
+          console.error(`消息处理器执行错误，话题: ${matchedTopic || topic}`, err)
+        }
       } else {
-        console.log(`收到未处理的话题 ${topic}:`, message)
+        // console.log(`收到未注册的话题 ${topic}（尝试匹配失败）:`, message)
       }
     } catch (error) {
       console.error(`处理消息错误 ${topic}:`, error)
@@ -324,69 +377,88 @@ class MQTTService {
   
   // 处理机器人位姿数据
   handlePoseData(data) {
-    if (data && data.pose) {
-      const x = data.pose.position.x
-      const y = data.pose.position.y
-      const theta = this.quaternionToYaw(data.pose.orientation)
-      
-      // 验证数据有效性
-      if (isNaN(x) || isNaN(y) || isNaN(theta)) {
-        console.warn('机器人位姿数据包含无效值:', { x, y, theta })
+    try {
+      if (!data) {
+        console.warn('无效的机器人位姿数据: data 为空')
         return
       }
-      
-      // 获取话题信息
-      const topic = data._topic || 'unknown'
-      
-      console.log('机器人位姿数据更新:', {
-        topic: topic,
-        x: x.toFixed(3),
-        y: y.toFixed(3),
-        theta: theta.toFixed(3),
-        theta_degrees: (theta * 180 / Math.PI).toFixed(1)
-      })
-      
-      // 处理所有位姿数据，但优先使用amcl数据
-      if (topic === '/amcl_pose' || topic.includes('amcl')) {
-        console.log('使用AMCL定位数据更新机器人位置')
-        this.robotStore.updateRobotPose({
-          x: x,
-          y: y,
-          theta: theta
-        })
-      } else if (topic === '/robot_pose') {
-        // /robot_pose 也用于更新，确保有数据可用
-        console.log('使用 /robot_pose 数据更新机器人位置')
-        this.robotStore.updateRobotPose({
-          x: x,
-          y: y,
-          theta: theta
-        })
-      } else {
-        // 其他未知话题，也进行更新以确保数据可用性
-        console.log('使用其他位姿话题数据更新机器人位置:', topic)
-        this.robotStore.updateRobotPose({
-          x: x,
-          y: y,
-          theta: theta
-        })
+
+      // 尝试从常见路径提取坐标和朝向
+      let x = null
+      let y = null
+      let theta = null
+
+      // 常见 ROS PoseStamped 格式
+      if (data.pose && data.pose.position) {
+        x = Number(data.pose.position.x)
+        y = Number(data.pose.position.y)
+        theta = this.quaternionToYaw(data.pose.orientation)
+      } else if (data.position && typeof data.position === 'object') {
+        x = Number(data.position.x)
+        y = Number(data.position.y)
+        if (data.orientation) {
+          theta = this.quaternionToYaw(data.orientation)
+        }
+      } else if (typeof data.x === 'number' || typeof data.x === 'string') {
+        x = Number(data.x)
+        y = Number(data.y)
+        // 支持 yaw 或 theta 字段
+        if (data.yaw !== undefined) theta = Number(data.yaw)
+        else if (data.theta !== undefined) theta = Number(data.theta)
+        else if (data.angle !== undefined) theta = Number(data.angle)
+      } else if (data.pose && (data.pose.x !== undefined || data.pose.y !== undefined)) {
+        x = Number(data.pose.x)
+        y = Number(data.pose.y)
+        if (data.pose.yaw !== undefined) theta = Number(data.pose.yaw)
+        else if (data.pose.theta !== undefined) theta = Number(data.pose.theta)
       }
-    } else {
-      console.warn('无效的机器人位姿数据:', data)
+
+      // 如果 theta 仍为空且存在 orientation 字段（四元数形式），解析它
+      if ((theta === null || isNaN(theta)) && data.orientation && data.orientation.x !== undefined) {
+        theta = this.quaternionToYaw(data.orientation)
+      }
+
+      // 最终验证
+      if (isNaN(x) || isNaN(y) || isNaN(theta)) {
+        // console.warn('机器人位姿数据包含无效值或缺少字段:', { x, y, theta, sample: data })
+        return
+      }
+
+      const topic = data._topic || 'unknown'
+
+      // 如果 mock 服务正在运行，忽略外部 MQTT 位姿推送，避免干扰模拟
+      try {
+        if (window && window.mockRobotService && window.mockRobotService.isRunning) {
+          // console.debug('mqttService: 忽略 MQTT 位姿更新，因为 mockRobotService 正在运行', topic)
+          return
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      // 更新 store
+      this.robotStore.updateRobotPose({ x: x, y: y, theta: theta })
+      this.robotStore.setHasRealPose(true)
+      
+    } catch (err) {
+      console.error('处理机器人位姿数据时发生异常:', err, data)
     }
   }
   
   // 处理激光雷达数据
   handleLaserScan(data) {
     if (data && data.ranges) {
-      // 清理激光雷达数据，处理 Infinity 和无效值
+      // 修复：不要使用 filter 删除元素，这会破坏索引与角度的对应关系！
+      // 使用 map 将无效值转换为 0 或 null，但保持数组长度不变
       const cleanedRanges = data.ranges.map(range => {
+        // 处理 null, undefined, Infinity
         if (range === null || range === undefined || range === 'Infinity') {
-          return null // 或者返回一个最大值，如 100.0
+          return 0.0 // 返回 0.0 代表无效或无限远，前端渲染时应处理 0 值
         }
         const num = parseFloat(range)
-        return isNaN(num) ? null : num
-      }).filter(range => range !== null)
+        // 处理 NaN 或无限大
+        return (isNaN(num) || !isFinite(num)) ? 0.0 : num
+      })
       
       this.robotStore.updateSensorData('laserScan', cleanedRanges)
     }
@@ -394,10 +466,25 @@ class MQTTService {
   
   // 处理导航状态
   handleNavigationStatus(data) {
+    // 如果 mock 服务正在运行，则忽略来自 MQTT 的导航状态更新，避免与本地模拟冲突
+    try {
+      if (window && window.mockRobotService && window.mockRobotService.isRunning) {
+        return
+      }
+    } catch (e) {}
+
     if (data && data.status_list && data.status_list.length > 0) {
-      const status = data.status_list[0].status
+      // 修复：不要只取第0个，应该取最后一个（最新的目标状态）
+      // status_list 通常按时间顺序排列，最后一个是最新的
+      const lastStatusObj = data.status_list[data.status_list.length - 1]
+      const status = lastStatusObj.status
+      
       let navStatus = 'idle'
       
+      // ROS actionlib_msgs/GoalStatus 定义:
+      // 1: ACTIVE (正在执行)
+      // 3: SUCCEEDED (成功)
+      // 4: ABORTED (失败)
       switch (status) {
         case 1: // ACTIVE
           navStatus = 'navigating'
@@ -406,8 +493,10 @@ class MQTTService {
           navStatus = 'arrived'
           break
         case 4: // ABORTED
+        case 5: // REJECTED
           navStatus = 'failed'
           break
+        case 2: // PREEMPTED
         default:
           navStatus = 'idle'
       }
@@ -419,16 +508,11 @@ class MQTTService {
   // 处理相机图像数据
   handleCameraImage(data) {
     if (data && data.image_data) {
-      // 假设数据是base64编码的图像
-      // 或者包含图像URL
       if (data.image_data.startsWith('data:image/')) {
-        // base64图像数据
         this.robotStore.updateSensorData('cameraImage', data.image_data)
       } else if (data.image_url) {
-        // 图像URL
         this.robotStore.updateSensorData('cameraImage', data.image_url)
       } else if (data.image_data) {
-        // 尝试处理其他格式的图像数据
         this.robotStore.updateSensorData('cameraImage', data.image_data)
       }
     }
@@ -437,21 +521,16 @@ class MQTTService {
   // 处理视频流数据
   handleVideoStream(data) {
     if (data && data.video_url) {
-      // 视频流URL（RTSP转WebRTC或HLS）
       this.robotStore.updateSensorData('videoStream', data.video_url)
     } else if (data && data.stream_url) {
-      // 备用字段名
       this.robotStore.updateSensorData('videoStream', data.stream_url)
     } else if (data && data.web_video_server_url) {
-      // web_video_server 流媒体URL
       this.robotStore.updateSensorData('videoStream', data.web_video_server_url)
     } else if (data && data.topic) {
-      // 如果只提供话题名，自动生成 web_video_server URL
-      const topic = data.topic.replace(/^\//, '') // 移除开头的斜杠
+      const topic = data.topic.replace(/^\//, '')
       const streamConfig = webVideoService.getAutoStreamConfig(topic)
       const streamUrl = webVideoService.generateStreamUrl(topic, streamConfig)
       
-      // 同时存储流配置信息
       this.robotStore.updateSensorData('videoStream', streamUrl)
       this.robotStore.updateSensorData('videoStreamConfig', {
         topic: topic,

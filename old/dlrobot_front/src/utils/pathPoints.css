@@ -1,0 +1,176 @@
+/* 路径点显示相关样式 */
+.path-points-display {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.8);
+  padding: 15px;
+  border-radius: 8px;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid #4a5568;
+  z-index: 1000;
+  min-width: 250px;
+  max-width: 350px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.path-points-header {
+  color: #63b3ed;
+  font-weight: bold;
+  margin-bottom: 10px;
+  text-align: center;
+  font-size: 14px;
+  border-bottom: 1px solid #4a5568;
+  padding-bottom: 5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.path-status {
+  font-size: 12px;
+  color: #a0aec0;
+}
+
+.path-points-list {
+  margin-bottom: 10px;
+}
+
+.path-point-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.path-point-item:hover {
+  background: rgba(66, 153, 225, 0.1);
+}
+
+.point-index {
+  color: #63b3ed;
+  font-weight: bold;
+  margin-right: 5px;
+  min-width: 20px;
+}
+
+.point-coords {
+  color: #e2e8f0;
+  font-size: 12px;
+  flex-grow: 1;
+}
+
+.point-yaw {
+  color: #a0aec0;
+  font-size: 11px;
+  margin-left: 5px;
+}
+
+.current-target {
+  background: rgba(72, 187, 120, 0.2);
+  border: 1px solid rgba(72, 187, 120, 0.5);
+}
+
+.visited-point {
+  opacity: 0.6;
+}
+
+.future-point {
+  opacity: 0.8;
+}
+
+.path-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #4a5568;
+}
+
+.path-btn {
+  flex: 1;
+  min-width: 60px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background-color 0.2s;
+}
+
+.path-btn:not(:disabled) {
+  background: #3182ce;
+  color: white;
+}
+
+.path-btn:not(:disabled):hover {
+  background: #2b6cb0;
+}
+
+.path-btn:disabled {
+  background: #718096;
+  color: #a0aec0;
+  cursor: not-allowed;
+}
+
+/* 路径点标记样式 */
+:deep(.path-point-marker-container) {
+  background: transparent;
+  border: none;
+}
+
+:deep(.path-point-marker) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: #38b2ac;
+  color: white;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: bold;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* 当前目标点标记样式 */
+:deep(.current-target-marker-container) {
+  background: transparent;
+  border: none;
+}
+
+:deep(.current-target-marker) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  font-size: 20px;
+  filter: drop-shadow(0 0 5px rgba(236, 201, 75, 0.8));
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

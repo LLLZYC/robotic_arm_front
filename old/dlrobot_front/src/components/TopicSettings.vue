@@ -839,6 +839,7 @@ export default {
   color: #e2e8f0;
   font-weight: 600;
   font-size: 14px;
+  -webkit-user-select: none;
   user-select: none;
 }
 

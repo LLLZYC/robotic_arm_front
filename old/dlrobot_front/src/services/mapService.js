@@ -112,7 +112,7 @@ class MapService {
     return {
       image: '/maps/DLROBOT.pgm',
       resolution: 0.05,
-      origin: [-5.0, -15.2, 0],
+      origin: [-5.00, -16.80, 0.00],
       negate: 0,
       occupied_thresh: 0.65,
       free_thresh: 0.196

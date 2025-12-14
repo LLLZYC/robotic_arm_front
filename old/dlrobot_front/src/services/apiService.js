@@ -17,6 +17,26 @@ class ApiService {
   initStore() {
     if (!this.robotStore) {
       this.robotStore = useRobotStore()
+
+      // 尝试从 localStorage 加载持久化配置（如果用户之前保存过）
+      try {
+        if (typeof this.robotStore.loadConfigFromLocalStorage === 'function') {
+          this.robotStore.loadConfigFromLocalStorage()
+        }
+      } catch (e) {
+        console.warn('加载本地配置失败:', e)
+      }
+
+      // 如果 store 中配置了 restApiUrl，则同步 axios 的 baseURL
+      try {
+        const storeUrl = this.robotStore?.config?.restApiUrl
+        if (storeUrl && typeof storeUrl === 'string' && storeUrl.trim()) {
+          console.log('apiService: 将 baseURL 同步为 robotStore 中的 restApiUrl:', storeUrl)
+          this.client.defaults.baseURL = storeUrl
+        }
+      } catch (e) {
+        console.warn('同步 apiService baseURL 失败:', e)
+      }
       
       // 请求拦截器
       this.client.interceptors.request.use(
@@ -239,14 +259,71 @@ class ApiService {
     }
   }
   
-  // 恢复巡航
+  // 开始巡航
+async startCruise() {
+    try {
+      // 这里的逻辑改为调用 /resume 接口，并带上参数
+      // 后端逻辑：resume + restart=true 等同于“从头开始巡航”
+      const response = await this.client.post('/api/navigation/resume', {
+        restart: true,           // 告诉后端从第一个点开始
+        clear_overrides: true    // 清除所有临时插队任务
+      })
+      console.log('巡航已开始:', response.data)
+      return response.data
+    } catch (error) {
+      this.handleApiError(error, '开始巡航指令')
+    }
+  }
+  
+  // 暂停导航
+  async pauseNavigation() {
+    try {
+      const response = await this.client.post('/api/navigation/pause')
+      console.log('导航已暂停:', response.data)
+      return response.data
+    } catch (error) {
+      console.error('暂停导航失败:', error)
+      throw error
+    }
+  }
+  
+// 恢复导航
   async resumeNavigation() {
     try {
       const response = await this.client.post('/api/navigation/resume')
-      console.log('巡航已恢复:', response.data)
+      console.log('导航已恢复:', response.data)
       return response.data
     } catch (error) {
-      console.error('恢复巡航失败:', error)
+      console.error('恢复导航失败:', error)
+      throw error
+    }
+  }
+
+  // 触发自动回充
+  async triggerAutoRecharge() {
+    try {
+      // 通过 resume 接口发送 trigger_auto_recharge 标志
+      const response = await this.client.post('/api/navigation/resume', {
+        trigger_auto_recharge: true
+      })
+      console.log('自动回充已触发:', response.data)
+      return response.data
+    } catch (error) {
+      console.error('触发回充失败:', error)
+      throw error
+    }
+  }
+
+  // 停止自动回充
+  async stopAutoRecharge() {
+    try {
+      const response = await this.client.post('/api/navigation/resume', {
+        stop_auto_recharge: true
+      })
+      console.log('自动回充已停止:', response.data)
+      return response.data
+    } catch (error) {
+      console.error('停止回充失败:', error)
       throw error
     }
   }
