@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PGM文件调试工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #1a202c;
+            color: #e2e8f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .section {
+            background: #2d3748;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        .info {
+            font-family: monospace;
+            background: #1a202c;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .hex {
+            font-family: monospace;
+            background: #1a202c;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        button {
+            background: #4299e1;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #3182ce;
+        }
+        canvas {
+            border: 1px solid #4a5568;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PGM文件调试工具</h1>
+        
+        <div class="section">
+            <h2>文件信息</h2>
+            <button onclick="loadPgmFile('/maps/DLROBOT.pgm')">加载DLROBOT.pgm</button>
+            <button onclick="loadPgmFile('/maps/sample_map.pgm')">加载sample_map.pgm</button>
+            
+            <div id="fileInfo" class="info">点击按钮加载文件...</div>
+        </div>
+        
+        <div class="section">
+            <h2>文件头分析</h2>
+            <div id="headerInfo" class="hex"></div>
+        </div>
+        
+        <div class="section">
+            <h2>图像预览</h2>
+            <canvas id="previewCanvas" width="400" height="400"></canvas>
+            <div id="previewInfo"></div>
+        </div>
+    </div>
+
+    <script>
+        async function loadPgmFile(url) {
+            try {
+                console.log('开始加载PGM文件:', url)
+                
+                const response = await fetch(url)
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+                }
+                
+                const arrayBuffer = await response.arrayBuffer()
+                const data = new Uint8Array(arrayBuffer)
+                
+                // 显示文件信息
+                document.getElementById('fileInfo').innerHTML = `
+                    <strong>文件:</strong> ${url}<br>
+                    <strong>大小:</strong> ${data.length} bytes<br>
+                    <strong>前20字节:</strong> ${Array.from(data.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' ')}
+                `
+                
+                // 分析文件头
+                analyzePgmHeader(data)
+                
+                // 尝试预览图像
+                previewPgmImage(data)
+                
+            } catch (error) {
+                console.error('加载PGM文件失败:', error)
+                document.getElementById('fileInfo').innerHTML = `错误: ${error.message}`
+            }
+        }
+        
+        function analyzePgmHeader(data) {
+            let headerText = ''
+            let offset = 0
+            
+            // 读取文件头（直到遇到非文本字符）
+            while (offset < data.length && offset < 200) {
+                const charCode = data[offset]
+                
+                // 可打印ASCII字符范围
+                if (charCode >= 32 && charCode <= 126) {
+                    headerText += String.fromCharCode(charCode)
+                } else if (charCode === 10 || charCode === 13) {
+                    headerText += '\\n'
+                } else {
+                    headerText += `\\x${charCode.toString(16).padStart(2, '0')}`
+                }
+                
+                // 如果连续遇到多个非文本字符，认为文件头结束
+                if (offset > 10 && charCode < 32 && charCode !== 10 && charCode !== 13 && charCode !== 9) {
+                    break
+                }
+                
+                offset++
+            }
+            
+            document.getElementById('headerInfo').innerHTML = headerText
+            
+            // 尝试解析PGM头
+            try {
+                const header = parsePgmHeader(data)
+                if (header) {
+                    document.getElementById('headerInfo').innerHTML += 
+                        '\\n\\n=== 解析结果 ===\\n' +
+                        `格式: ${header.magicNumber}\\n` +
+                        `宽度: ${header.width}\\n` +
+                        `高度: ${header.height}\\n` +
+                        `最大值: ${header.maxValue}\\n` +
+                        `数据偏移: ${header.dataOffset}\\n` +
+                        `数据大小: ${header.width * header.height}`
+                }
+            } catch (e) {
+                document.getElementById('headerInfo').innerHTML += '\\n\\n=== 头解析失败 ==='
+            }
+        }
+        
+        function parsePgmHeader(data) {
+            try {
+                // 检查文件头标识
+                const magicNumber = String.fromCharCode(data[0], data[1])
+                
+                if (magicNumber !== 'P5') {
+                    throw new Error(`不支持的格式: ${magicNumber}`)
+                }
+                
+                let offset = 2
+                
+                // 跳过空白字符
+                while (offset < data.length && (data[offset] === 32 || data[offset] === 9 || data[offset] === 10 || data[offset] === 13)) {
+                    offset++
+                }
+                
+                // 读取宽度
+                let widthStr = ''
+                while (offset < data.length && data[offset] >= 48 && data[offset] <= 57) {
+                    widthStr += String.fromCharCode(data[offset])
+                    offset++
+                }
+                
+                // 跳过空白字符
+                while (offset < data.length && (data[offset] === 32 || data[offset] === 9 || data[offset] === 10 || data[offset] === 13)) {
+                    offset++
+                }
+                
+                // 读取高度
+                let heightStr = ''
+                while (offset < data.length && data[offset] >= 48 && data[offset] <= 57) {
+                    heightStr += String.fromCharCode(data[offset])
+                    offset++
+                }
+                
+                // 跳过空白字符
+                while (offset < data.length && (data[offset] === 32 || data[offset] === 9 || data[offset] === 10 || data[offset] === 13)) {
+                    offset++
+                }
+                
+                // 读取最大值
+                let maxValueStr = ''
+                while (offset < data.length && data[offset] >= 48 && data[offset] <= 57) {
+                    maxValueStr += String.fromCharCode(data[offset])
+                    offset++
+                }
+                
+                // 跳过空白字符，找到数据开始位置
+                while (offset < data.length && (data[offset] === 32 || data[offset] === 9 || data[offset] === 10 || data[offset] === 13)) {
+                    offset++
+                }
+                
+                const width = parseInt(widthStr)
+                const height = parseInt(heightStr)
+                const maxValue = parseInt(maxValueStr)
+                
+                if (isNaN(width) || isNaN(height) || isNaN(maxValue)) {
+                    throw new Error('头解析失败')
+                }
+                
+                return { width, height, maxValue, dataOffset: offset, magicNumber }
+                
+            } catch (error) {
+                throw error
+            }
+        }
+        
+        function previewPgmImage(data) {
+            try {
+                const header = parsePgmHeader(data)
+                if (!header) {
+                    throw new Error('无法解析PGM头')
+                }
+                
+                const canvas = document.getElementById('previewCanvas')
+                const ctx = canvas.getContext('2d')
+                
+                // 调整Canvas大小
+                canvas.width = header.width
+                canvas.height = header.height
+                
+                const imageData = ctx.createImageData(header.width, header.height)
+                
+                const dataOffset = header.dataOffset
+                
+                for (let y = 0; y < header.height; y++) {
+                    for (let x = 0; x < header.width; x++) {
+                        const pgmIndex = dataOffset + y * header.width + x
+                        const rgbaIndex = (y * header.width + x) * 4
+                        
+                        if (pgmIndex < data.length) {
+                            const grayValue = data[pgmIndex]
+                            
+                            // 转换为灰度
+                            imageData.data[rgbaIndex] = grayValue     // R
+                            imageData.data[rgbaIndex + 1] = grayValue // G
+                            imageData.data[rgbaIndex + 2] = grayValue // B
+                            imageData.data[rgbaIndex + 3] = 255       // A
+                        }
+                    }
+                }
+                
+                ctx.putImageData(imageData, 0, 0)
+                
+                document.getElementById('previewInfo').innerHTML = 
+                    `图像尺寸: ${header.width} × ${header.height}<br>` +
+                    `数据偏移: ${header.dataOffset}<br>` +
+                    `最大值: ${header.maxValue}`
+                
+            } catch (error) {
+                document.getElementById('previewInfo').innerHTML = `预览失败: ${error.message}`
+            }
+        }
+        
+        // 页面加载时自动加载DLROBOT.pgm
+        window.addEventListener('load', () => {
+            loadPgmFile('/maps/DLROBOT.pgm')
+        })
+    </script>
+</body>
+</html>

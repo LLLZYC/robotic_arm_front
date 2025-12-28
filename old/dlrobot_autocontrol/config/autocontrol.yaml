@@ -5,8 +5,8 @@ sequence:
   publish_interval: 1.0
   goal_timeout: 180.0
   resume_previous_goal: true
-  wait_between_goals: 4.0
-  wait_between_patrols: 600.0
+  wait_between_goals: 2.0
+  wait_between_patrols: 10.0
 
 # 关键话题映射
 topics:

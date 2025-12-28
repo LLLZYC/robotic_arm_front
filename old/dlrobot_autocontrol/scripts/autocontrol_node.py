@@ -512,6 +512,10 @@ class AutoControlNode:
         self._post_goal_busy = False
         self._charging_release_active = False
         self._goal_seq = 0
+        
+        # ⚠️ 【新增】防止状态跳变的关键变量
+        self._active_goal_id = "" 
+        self._last_fail_ts = 0.0
 
         self._lock = threading.RLock()
         self._goal_available = threading.Condition(self._lock)
@@ -606,10 +610,12 @@ class AutoControlNode:
             self._auto_recharge_stop_clients.append((candidate, client))
         self._rest_server = RestApiServer(self, rest_host, rest_port, rest_endpoint, rest_token, rest_timeout)
 
+        # ⚠️ 【重要修复】启用核心线程
         self._manager_thread = threading.Thread(target=self._goal_loop, daemon=True)
         self._shutdown = False
         rospy.on_shutdown(self._on_shutdown)
         self._rest_server.start()
+        # ⚠️ 【重要修复】启用核心线程
         self._manager_thread.start()
 
         self._publish_charge_flag(False)
@@ -678,6 +684,7 @@ class AutoControlNode:
         with self._goal_available:
             active = self._active_goal
             self._active_goal = None
+            self._active_goal_id = ""  # ⚠️ 【新增】清除当前ID
             self._active_goal_deadline = rospy.Time(0)
             self._post_goal_busy = False
             self._goal_available.notify_all()
@@ -702,13 +709,21 @@ class AutoControlNode:
             self._hold_idle_timeout = idle_timeout
             self._hold_active = True
             self._hold_triggered_recharge = False
+
             self._hold_last_activity = now_ts
+            
+            # ⚠️ 【新增】停止导航时，强制清除充电挂起状态，让前端按钮复位
+            if self._charging_suspended:
+                rospy.loginfo("Hold requested; clearing charging suspension")
+                self._charging_suspended = False
+
             active_goal = self._active_goal
             if active_goal and active_goal.source == "sequence" and self._resume_previous_goal:
                 self._pending_goal = active_goal
             else:
                 self._pending_goal = None
             self._active_goal = None
+            self._active_goal_id = ""  # ⚠️ 【新增】清除当前ID
             self._active_goal_deadline = rospy.Time(0)
             self._active_goal_sent = rospy.Time(0)
             self._post_goal_busy = False
@@ -720,25 +735,55 @@ class AutoControlNode:
             self._cancel_pub.publish(GoalID())
         self._cmd_vel_pub.publish(Twist())
         return True, f"hold engaged, idle timeout {idle_timeout:.1f}s", 200
+    
+    # ⚠️ 【新增】异步回充执行函数
+    def _async_manual_recharge(self) -> None:
+        rospy.loginfo("Async manual recharge sequence started")
+        # 1. 先挂起导航逻辑
+        self._activate_charging(time.time())
+        # 2. 再触发外部回充服务
+        self._trigger_auto_recharge()
 
     def resume_schedule(self, payload: Optional[Dict[str, Any]]) -> Tuple[bool, str, int]:
         clear_overrides = False
         trigger_recharge = False
         stop_charging = False
+        restart = False  # ⚠️ 【新增】
         charging_was_suspended = False
+
         if isinstance(payload, dict):
             clear_overrides = bool(payload.get("clear_overrides", False))
             trigger_recharge = bool(payload.get("trigger_auto_recharge", False))
             stop_charging = bool(payload.get("stop_auto_recharge", False))
+            restart = bool(payload.get("restart", False)) # ⚠️ 【新增】
+
         with self._goal_available:
             was_hold = self._hold_active or self._hold_triggered_recharge
             if clear_overrides:
                 self._override_goals.clear()
+            
+            # ⚠️ 【新增】霸道重启逻辑：强制取消当前任务并从头开始
+            if restart:
+                self._goal_index = 0
+                self._pending_goal = None
+                self._active_goal_deadline = rospy.Time(0)
+                
+                # 强制取消当前正在跑的任务
+                if self._active_goal:
+                    rospy.loginfo("Restart force cancels active goal: %s", self._active_goal.name)
+                    self._active_goal = None
+                    self._active_goal_id = "" # 清空ID
+                    if self._cancel_pub:
+                        self._cancel_pub.publish(GoalID()) # 发送停止指令给底盘
+
+                rospy.loginfo("Restart requested via resume: resetting sequence to 0")
+
             self._hold_active = False
             self._hold_triggered_recharge = False
             self._hold_last_activity = time.time()
             charging_was_suspended = self._charging_suspended
             self._goal_available.notify_all()
+        
         self._bump_metric("resume_requests")
         rospy.loginfo(
             "Resume requested (clear_overrides=%s, trigger_auto_recharge=%s, was_hold=%s)",
@@ -755,7 +800,10 @@ class AutoControlNode:
             rospy.loginfo("Charging suspension cleared due to resume request")
             self._request_charge_release(reason="resume_release", manual=True)
         if trigger_recharge:
-            self._trigger_auto_recharge()
+            # ⚠️ 【修复】改为异步线程执行，防止前端请求超时
+            rospy.loginfo("Manual auto-recharge triggered via API (async)")
+            threading.Thread(target=self._async_manual_recharge, daemon=True).start()
+            
         if was_hold:
             return True, "resume acknowledged", 200
         return True, "no hold active", 200
@@ -906,6 +954,8 @@ class AutoControlNode:
                     if self._cancel_pub:
                         cancel_active = True
                         self._active_goal = None
+                        # ⚠️ 清除ID
+                        self._active_goal_id = ""
                     else:
                         rospy.logwarn(
                             "Activate request for %s but cancel publisher unavailable; waiting for current goal to finish",
@@ -961,6 +1011,7 @@ class AutoControlNode:
                 if self._cancel_pub:
                     cancel_active = True
                     self._active_goal = None
+                    self._active_goal_id = "" # ⚠️ 清除ID
                     self._active_goal_deadline = rospy.Time(0)
                     self._post_goal_busy = False
                 else:
@@ -1265,6 +1316,12 @@ class AutoControlNode:
                     if self._post_goal_busy:
                         self._goal_available.wait(timeout=self._idle_wait)
                         continue
+                    
+                    # ⚠️ 【新增】失败冷却逻辑：如果距上次失败不到3秒，则暂停派发
+                    if self._pending_goal and (time.time() - self._last_fail_ts < 3.0):
+                        self._goal_available.wait(timeout=1.0)
+                        continue
+
                     if not goal:
                         goal = self._pick_next_goal_locked()
                     if not goal:
@@ -1306,6 +1363,9 @@ class AutoControlNode:
                 # 确保停充流程彻底完成，再继续派发导航
                 while self._charging_release_active and not rospy.is_shutdown():
                     self._goal_available.wait(timeout=0.1)
+
+        rospy.sleep(1.5)  # 确保底盘有时间处理停充指令
+
         if goal.wait_before > 0.0:
             self._timed_sleep(goal.wait_before)
         msg = goal.pose_stamped()
@@ -1316,10 +1376,16 @@ class AutoControlNode:
             action_msg.header.frame_id = msg.header.frame_id
             action_msg.goal.target_pose = msg
             action_msg.goal_id.stamp = rospy.Time.now()
-            action_msg.goal_id.id = f"{self._node_name}_{self._goal_seq}"
+            
+            # ⚠️ 【新增】生成并记录 ID
+            current_id = f"{self._node_name}_{self._goal_seq}"
+            action_msg.goal_id.id = current_id
+            self._active_goal_id = current_id 
+            
             self._goal_seq += 1
             self._simple_goal_pub.publish(action_msg)
         else:
+            self._active_goal_id = "" # 非Action模式无法追踪
             self._simple_goal_pub.publish(msg)
         with self._goal_available:
             self._active_goal_sent = rospy.Time.now()
@@ -1341,15 +1407,25 @@ class AutoControlNode:
         with self._goal_available:
             if not self._active_goal:
                 return
+            
+            # ⚠️ 【新增】核对身份证：忽略过期结果
+            if self._use_action_goal and self._active_goal_id and msg.status.goal_id.id != self._active_goal_id:
+                rospy.logwarn("Ignored outdated result for goal %s (current: %s)", msg.status.goal_id.id, self._active_goal_id)
+                return
+
             goal = self._active_goal
             if status == GoalStatus.SUCCEEDED:
                 rospy.loginfo("Goal %s reached", goal.name)
                 self._active_goal = None
+                self._active_goal_id = ""
                 self._active_goal_deadline = rospy.Time(0)
                 self._post_goal_busy = True
                 self._goal_available.notify_all()
             else:
                 rospy.logwarn("Goal %s failed with status %d", goal.name, status)
+                # ⚠️ 【新增】记录失败时间
+                self._last_fail_ts = time.time()
+                
                 self._active_goal = None
                 self._active_goal_deadline = rospy.Time(0)
                 if goal.source == "sequence":
@@ -1422,6 +1498,12 @@ class AutoControlNode:
             else:
                 capture_spacing = 0.0
             while time.time() < end_time and not rospy.is_shutdown():
+                # ⚠️ 【新增】旋转中途打断检查：如果停止，立即退出
+                if not self._post_goal_busy:
+                    rospy.loginfo("Rotation interrupted by stop command")
+                    self._cmd_vel_pub.publish(Twist()) # 立即停车
+                    return captured_paths
+                
                 now = time.time()
                 self._cmd_vel_pub.publish(twist)
                 if captures_during_rotation and captured_count < snapshots and now >= next_capture_time:
@@ -1767,6 +1849,7 @@ class AutoControlNode:
                     self._override_goals.appendleft(self._active_goal)
                 rospy.loginfo("Charging pause: parking goal %s", self._active_goal.name)
                 self._active_goal = None
+                self._active_goal_id = "" # ⚠️ 【修复】必须清除ID，防止状态残留
                 self._active_goal_deadline = rospy.Time(0)
             if not self._charging_suspended:
                 self._charging_suspended = True
@@ -1860,7 +1943,7 @@ class AutoControlNode:
             else:
                 self._charge_service.wait_for_service()
         except rospy.ROSException as exc:
-            rospy.logerr("Charge service %s unavailable: %s", self._charge_service_name, exc)
+            rospy.logerr("Charge service %s unavailable: %s, disable service calls", self._charge_service_name, exc)
             return
         try:
             if self._charge_service_type == "trigger":

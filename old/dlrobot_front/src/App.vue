@@ -1,5 +1,8 @@
 <template>
   <div class="app">
+    <!-- 测试控制面板 -->
+    <TestControlPanel />
+    
     <!-- 顶部导航栏 -->
     <header class="app-header">
       <div class="header-left">
@@ -259,16 +262,16 @@
             <div class="setting-group">
               <h4>地图参数</h4>
               <div class="setting-item">
-                <label>地图分辨率 (m/pixel):</label>
-                <input v-model="settings.mapResolution" type="number" step="0.01" />
+                <label for="map-resolution">地图分辨率 (m/pixel):</label>
+                <input id="map-resolution" v-model="settings.mapResolution" type="number" step="0.01" placeholder="例如: 0.05" />
               </div>
               <div class="setting-item">
-                <label>地图原点 X (m):</label>
-                <input v-model="settings.mapOriginX" type="number" step="0.1" />
+                <label for="map-origin-x">地图原点 X (m):</label>
+                <input id="map-origin-x" v-model="settings.mapOriginX" type="number" step="0.1" placeholder="例如: -5.00" />
               </div>
               <div class="setting-item">
-                <label>地图原点 Y (m):</label>
-                <input v-model="settings.mapOriginY" type="number" step="0.1" />
+                <label for="map-origin-y">地图原点 Y (m):</label>
+                <input id="map-origin-y" v-model="settings.mapOriginY" type="number" step="0.1" placeholder="例如: -15.20" />
               </div>
               <div class="setting-item">
                 <label>相机图像路径:</label>
@@ -317,6 +320,7 @@ import DataMonitor from './components/DataMonitor.vue'
 import CameraGallery from './components/CameraGallery.vue'
 import ArmControl from './components/ArmControl.vue'
 import ThermalDisplay from './components/ThermalDisplay.vue'
+import TestControlPanel from './components/TestControlPanel.vue'
 import mqttService from './services/mqttService'
 
 export default {
@@ -328,7 +332,8 @@ export default {
     DataMonitor,
     CameraGallery,
     ArmControl,
-    ThermalDisplay
+    ThermalDisplay,
+    TestControlPanel
   },
   
   setup() {
@@ -736,6 +741,7 @@ export default {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  -webkit-backdrop-filter: blur(5px);
   backdrop-filter: blur(5px);
 }
 
